@@ -36,12 +36,14 @@ app = FastAPI(
 )
 
 # Import routers
-from app.api.v1 import auth, tenants, users  # noqa: E402
+from app.api.v1 import auth, dashboards, panels, tenants, users  # noqa: E402
 
 # Register API v1 routers
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(tenants.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
+app.include_router(dashboards.router, prefix="/api/v1/dashboards", tags=["dashboards"])
+app.include_router(panels.router, prefix="/api/v1/panels", tags=["panels"])
 
 
 @app.get("/health")
