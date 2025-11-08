@@ -1,0 +1,24 @@
+panel:
+  type: "health_status"
+  title: "Service Health"
+
+  data_source:
+    table: "service_health"
+    columns:
+      service_name: "name"
+      status_value: "last_check_status"
+      timestamp: "last_checked_at"
+
+  display:
+    status_mapping:
+      0:
+        color: "#10B981"  # Green
+        label: "Healthy"
+      1:
+        color: "#F59E0B"  # Amber
+        label: "Degraded"
+      2:
+        color: "#EF4444"  # Red
+        label: "Down"
+
+  refresh_interval: 120

@@ -1,0 +1,40 @@
+dashboard:
+  name: "System Health Dashboard"
+  description: "Main operational dashboard"
+  refresh_interval: 21600  # seconds (6 hours)
+
+  layout:
+    columns: 12  # Grid system (like Bootstrap)
+
+  panels:
+    - id: "cpu_usage"
+      config_file: "panels/cpu_usage.yaml"
+      position:
+        row: 1
+        col: 1
+        width: 8  # columns
+        height: 2  # rows
+
+    - id: "memory_kpi"
+      config_file: "panels/memory_kpi.yaml"
+      position:
+        row: 1
+        col: 9
+        width: 4
+        height: 1
+
+    - id: "system_health"
+      config_file: "panels/health_status.yaml"
+      position:
+        row: 2
+        col: 9
+        width: 4
+        height: 1
+
+    - id: "error_log"
+      config_file: "panels/error_log.yaml"
+      position:
+        row: 3
+        col: 1
+        width: 12
+        height: 2
