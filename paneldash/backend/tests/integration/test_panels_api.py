@@ -1,7 +1,7 @@
 """Integration tests for panel data API endpoints."""
 
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import status
@@ -107,45 +107,67 @@ async def test_get_timeseries_panel_data(
     await db_session.commit()
 
     from app.auth.dependencies import get_current_active_user
+    from app.services.config_loader import get_config_loader
+    from app.services.query_builder import get_query_builder
+    from app.services.data_aggregator import get_data_aggregator
+    from app.schemas.config import TimeSeriesPanelConfig, TimeSeriesDataSource
 
     async def override_get_current_user() -> User:
         return panel_test_user
 
+    # Create real time series config object
+    time_series_config = TimeSeriesPanelConfig(
+        title="CPU Usage",
+        data_source=TimeSeriesDataSource(
+            table="metrics",
+            columns={"timestamp": "recorded_at", "value": "cpu_percent"}
+        )
+    )
+
+    # Mock config loader
+    mock_loader = MagicMock()
+    mock_loader.load_panel_config.return_value = time_series_config
+
+    def override_get_config_loader():
+        return mock_loader
+
+    # Mock query builder
+    mock_qb = MagicMock()
+    mock_qb.build_time_series_query.return_value = ("SELECT *", {})
+
+    def override_get_query_builder():
+        return mock_qb
+
+    # Mock data aggregator
+    mock_agg = MagicMock()
+    mock_agg.should_aggregate.return_value = True
+    mock_agg.get_bucket_interval.return_value = "10 minutes"
+
+    def override_get_data_aggregator():
+        return mock_agg
+
     app.dependency_overrides[get_current_active_user] = override_get_current_user
+    app.dependency_overrides[get_config_loader] = override_get_config_loader
+    app.dependency_overrides[get_query_builder] = override_get_query_builder
+    app.dependency_overrides[get_data_aggregator] = override_get_data_aggregator
 
-    with patch("app.api.v1.panels.get_config_loader") as mock_get_loader:
-        mock_loader = MagicMock()
-        mock_config = MagicMock()
-        mock_config.type = PanelType.TIMESERIES
-        mock_loader.load_panel_config.return_value = mock_config
-        mock_get_loader.return_value = mock_loader
+    date_from = datetime.now() - timedelta(days=1)
+    date_to = datetime.now()
 
-        with (
-            patch("app.api.v1.panels.get_query_builder") as mock_get_qb,
-            patch("app.api.v1.panels.get_data_aggregator") as mock_get_agg,
-        ):
-            mock_qb = MagicMock()
-            mock_qb.build_time_series_query.return_value = ("SELECT *", {})
-            mock_get_qb.return_value = mock_qb
+    response = await client.get(
+        "/api/v1/panels/cpu_usage/data",
+        params={
+            "tenant_id": panel_test_tenant.tenant_id,
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+        },
+    )
 
-            mock_agg = MagicMock()
-            mock_agg.should_aggregate.return_value = True
-            mock_agg.get_bucket_interval.return_value = "10 minutes"
-            mock_get_agg.return_value = mock_agg
-
-            date_from = datetime.now() - timedelta(days=1)
-            date_to = datetime.now()
-
-            response = await client.get(
-                "/api/v1/panels/cpu_usage/data",
-                params={
-                    "tenant_id": panel_test_tenant.tenant_id,
-                    "date_from": date_from.isoformat(),
-                    "date_to": date_to.isoformat(),
-                },
-            )
-
+    # Clean up overrides
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(get_config_loader, None)
+    app.dependency_overrides.pop(get_query_builder, None)
+    app.dependency_overrides.pop(get_data_aggregator, None)
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -163,31 +185,50 @@ async def test_get_kpi_panel_data(
     await db_session.commit()
 
     from app.auth.dependencies import get_current_active_user
+    from app.services.config_loader import get_config_loader
+    from app.services.query_builder import get_query_builder
+    from app.schemas.config import KPIPanelConfig, KPIDataSource, KPIDisplay
 
     async def override_get_current_user() -> User:
         return panel_test_user
 
+    # Create real KPI config object
+    kpi_config = KPIPanelConfig(
+        title="CPU KPI",
+        data_source=KPIDataSource(
+            table="metrics",
+            columns={"value": "cpu_percent"}
+        ),
+        display=KPIDisplay(unit="%", decimals=1, thresholds=[])
+    )
+
+    # Mock config loader
+    mock_loader = MagicMock()
+    mock_loader.load_panel_config.return_value = kpi_config
+
+    def override_get_config_loader():
+        return mock_loader
+
+    # Mock query builder
+    mock_qb = MagicMock()
+    mock_qb.build_kpi_query.return_value = ("SELECT AVG(value)", {})
+
+    def override_get_query_builder():
+        return mock_qb
+
     app.dependency_overrides[get_current_active_user] = override_get_current_user
+    app.dependency_overrides[get_config_loader] = override_get_config_loader
+    app.dependency_overrides[get_query_builder] = override_get_query_builder
 
-    with patch("app.api.v1.panels.get_config_loader") as mock_get_loader:
-        mock_loader = MagicMock()
-        mock_config = MagicMock()
-        mock_config.type = PanelType.KPI
-        mock_config.display = MagicMock(unit="%", decimals=1, thresholds=[])
-        mock_loader.load_panel_config.return_value = mock_config
-        mock_get_loader.return_value = mock_loader
+    response = await client.get(
+        "/api/v1/panels/cpu_kpi/data",
+        params={"tenant_id": panel_test_tenant.tenant_id},
+    )
 
-        with patch("app.api.v1.panels.get_query_builder") as mock_get_qb:
-            mock_qb = MagicMock()
-            mock_qb.build_kpi_query.return_value = ("SELECT AVG(value)", {})
-            mock_get_qb.return_value = mock_qb
-
-            response = await client.get(
-                "/api/v1/panels/cpu_kpi/data",
-                params={"tenant_id": panel_test_tenant.tenant_id},
-            )
-
+    # Clean up overrides
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(get_config_loader, None)
+    app.dependency_overrides.pop(get_query_builder, None)
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -206,35 +247,60 @@ async def test_get_health_status_panel_data(
     await db_session.commit()
 
     from app.auth.dependencies import get_current_active_user
+    from app.services.config_loader import get_config_loader
+    from app.services.query_builder import get_query_builder
+    from app.schemas.config import (
+        HealthStatusPanelConfig,
+        HealthStatusDataSource,
+        HealthStatusDisplay,
+        HealthStatusMapping
+    )
 
     async def override_get_current_user() -> User:
         return panel_test_user
 
+    # Create real health status config object
+    health_config = HealthStatusPanelConfig(
+        title="System Health",
+        data_source=HealthStatusDataSource(
+            table="health_status",
+            columns={"service_name": "name", "status_value": "status"}
+        ),
+        display=HealthStatusDisplay(
+            status_mapping={
+                0: HealthStatusMapping(label="healthy", color="#10B981"),
+                1: HealthStatusMapping(label="degraded", color="#F59E0B"),
+            }
+        )
+    )
+
+    # Mock config loader
+    mock_loader = MagicMock()
+    mock_loader.load_panel_config.return_value = health_config
+
+    def override_get_config_loader():
+        return mock_loader
+
+    # Mock query builder
+    mock_qb = MagicMock()
+    mock_qb.build_health_status_query.return_value = ("SELECT *", {})
+
+    def override_get_query_builder():
+        return mock_qb
+
     app.dependency_overrides[get_current_active_user] = override_get_current_user
+    app.dependency_overrides[get_config_loader] = override_get_config_loader
+    app.dependency_overrides[get_query_builder] = override_get_query_builder
 
-    with patch("app.api.v1.panels.get_config_loader") as mock_get_loader:
-        mock_loader = MagicMock()
-        mock_config = MagicMock()
-        mock_config.type = PanelType.HEALTH_STATUS
-        mock_config.display = MagicMock()
-        mock_config.display.status_mapping = {
-            0: MagicMock(label="healthy", color="#10B981"),
-            1: MagicMock(label="degraded", color="#F59E0B"),
-        }
-        mock_loader.load_panel_config.return_value = mock_config
-        mock_get_loader.return_value = mock_loader
+    response = await client.get(
+        "/api/v1/panels/system_health/data",
+        params={"tenant_id": panel_test_tenant.tenant_id},
+    )
 
-        with patch("app.api.v1.panels.get_query_builder") as mock_get_qb:
-            mock_qb = MagicMock()
-            mock_qb.build_health_status_query.return_value = ("SELECT *", {})
-            mock_get_qb.return_value = mock_qb
-
-            response = await client.get(
-                "/api/v1/panels/system_health/data",
-                params={"tenant_id": panel_test_tenant.tenant_id},
-            )
-
+    # Clean up overrides
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(get_config_loader, None)
+    app.dependency_overrides.pop(get_query_builder, None)
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -252,40 +318,64 @@ async def test_get_table_panel_data(
     await db_session.commit()
 
     from app.auth.dependencies import get_current_active_user
+    from app.services.config_loader import get_config_loader
+    from app.services.query_builder import get_query_builder
+    from app.schemas.config import (
+        TablePanelConfig,
+        TableDataSource,
+        TableDisplay,
+        TableColumn
+    )
 
     async def override_get_current_user() -> User:
         return panel_test_user
 
+    # Create real table config object
+    table_config = TablePanelConfig(
+        title="Error Logs",
+        data_source=TableDataSource(
+            table="logs",
+            columns=[
+                TableColumn(name="timestamp", display="Time", format="datetime"),
+                TableColumn(name="message", display="Message"),
+                TableColumn(name="severity", display="Severity"),
+            ]
+        ),
+        display=TableDisplay(pagination=25, default_sort="timestamp")
+    )
+
+    # Mock config loader
+    mock_loader = MagicMock()
+    mock_loader.load_panel_config.return_value = table_config
+
+    def override_get_config_loader():
+        return mock_loader
+
+    # Mock query builder
+    mock_qb = MagicMock()
+    mock_qb.build_table_query.return_value = ("SELECT *", {})
+
+    def override_get_query_builder():
+        return mock_qb
+
     app.dependency_overrides[get_current_active_user] = override_get_current_user
+    app.dependency_overrides[get_config_loader] = override_get_config_loader
+    app.dependency_overrides[get_query_builder] = override_get_query_builder
 
-    with patch("app.api.v1.panels.get_config_loader") as mock_get_loader:
-        mock_loader = MagicMock()
-        mock_config = MagicMock()
-        mock_config.type = PanelType.TABLE
-        mock_config.display = MagicMock(pagination=25, default_sort="timestamp")
-        mock_config.data_source = MagicMock()
-        mock_config.data_source.columns = [
-            MagicMock(name="timestamp", display="Time", format="datetime"),
-        ]
-        mock_loader.load_panel_config.return_value = mock_config
-        mock_get_loader.return_value = mock_loader
+    response = await client.get(
+        "/api/v1/panels/error_logs/data",
+        params={
+            "tenant_id": panel_test_tenant.tenant_id,
+            "sort_column": "timestamp",
+            "sort_order": "desc",
+            "page": 1,
+        },
+    )
 
-        with patch("app.api.v1.panels.get_query_builder") as mock_get_qb:
-            mock_qb = MagicMock()
-            mock_qb.build_table_query.return_value = ("SELECT *", {})
-            mock_get_qb.return_value = mock_qb
-
-            response = await client.get(
-                "/api/v1/panels/error_logs/data",
-                params={
-                    "tenant_id": panel_test_tenant.tenant_id,
-                    "sort_column": "timestamp",
-                    "sort_order": "desc",
-                    "page": 1,
-                },
-            )
-
+    # Clean up overrides
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(get_config_loader, None)
+    app.dependency_overrides.pop(get_query_builder, None)
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()

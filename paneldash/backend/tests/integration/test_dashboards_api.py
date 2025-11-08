@@ -1,6 +1,6 @@
 """Integration tests for dashboard configuration API endpoints."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import status
@@ -81,25 +81,29 @@ async def test_list_dashboards_success(
 
     # Mock authentication
     from app.auth.dependencies import get_current_active_user
+    from app.services.config_loader import get_config_loader
 
     async def override_get_current_user() -> User:
         return test_user_regular
 
+    # Mock config loader
+    mock_loader = MagicMock()
+    mock_loader.list_dashboards.return_value = ["default", "monitoring", "analytics"]
+
+    def override_get_config_loader():
+        return mock_loader
+
     app.dependency_overrides[get_current_active_user] = override_get_current_user
+    app.dependency_overrides[get_config_loader] = override_get_config_loader
 
-    # Mock the config loader
-    with patch("app.api.v1.dashboards.get_config_loader") as mock_get_loader:
-        mock_loader = MagicMock()
-        mock_loader.list_dashboards.return_value = ["default", "monitoring", "analytics"]
-        mock_get_loader.return_value = mock_loader
+    response = await client.get(
+        "/api/v1/dashboards",
+        params={"tenant_id": test_tenant_dash.tenant_id},
+    )
 
-        response = await client.get(
-            "/api/v1/dashboards",
-            params={"tenant_id": test_tenant_dash.tenant_id},
-        )
-
-    # Clean up override
+    # Clean up overrides
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(get_config_loader, None)
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -167,25 +171,29 @@ async def test_list_dashboards_admin_access(
     """Test admin can list dashboards for any tenant without explicit access."""
     # Mock authentication with admin user
     from app.auth.dependencies import get_current_active_user
+    from app.services.config_loader import get_config_loader
 
     async def override_get_current_user() -> User:
         return test_user_admin
 
-    app.dependency_overrides[get_current_active_user] = override_get_current_user
-
     # Mock config loader
-    with patch("app.api.v1.dashboards.get_config_loader") as mock_get_loader:
-        mock_loader = MagicMock()
-        mock_loader.list_dashboards.return_value = ["default"]
-        mock_get_loader.return_value = mock_loader
+    mock_loader = MagicMock()
+    mock_loader.list_dashboards.return_value = ["default"]
 
-        response = await client.get(
-            "/api/v1/dashboards",
-            params={"tenant_id": test_tenant_dash.tenant_id},
-        )
+    def override_get_config_loader():
+        return mock_loader
 
-    # Clean up override
+    app.dependency_overrides[get_current_active_user] = override_get_current_user
+    app.dependency_overrides[get_config_loader] = override_get_config_loader
+
+    response = await client.get(
+        "/api/v1/dashboards",
+        params={"tenant_id": test_tenant_dash.tenant_id},
+    )
+
+    # Clean up overrides
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(get_config_loader, None)
 
     assert response.status_code == status.HTTP_200_OK
 
@@ -202,36 +210,53 @@ async def test_get_dashboard_success(
 
     # Mock authentication
     from app.auth.dependencies import get_current_active_user
+    from app.services.config_loader import get_config_loader
+    from app.schemas.config import (
+        DashboardConfigRoot,
+        DashboardConfig,
+        DashboardLayout,
+        DashboardPanelReference,
+        PanelPosition
+    )
 
     async def override_get_current_user() -> User:
         return test_user_regular
 
-    app.dependency_overrides[get_current_active_user] = override_get_current_user
-
-    # Mock the config loader
-    with patch("app.api.v1.dashboards.get_config_loader") as mock_get_loader:
-        mock_loader = MagicMock()
-
-        # Create mock dashboard config
-        mock_dashboard_config = MagicMock()
-        mock_dashboard_config.dashboard.name = "Default Dashboard"
-        mock_dashboard_config.dashboard.description = "Main operations dashboard"
-        mock_dashboard_config.dashboard.refresh_interval = 30
-        mock_dashboard_config.dashboard.layout = MagicMock(columns=12)
-        mock_dashboard_config.dashboard.panels = [
-            MagicMock(id="cpu_usage", config_file="panels/cpu.yaml")
-        ]
-
-        mock_loader.load_dashboard_config.return_value = mock_dashboard_config
-        mock_get_loader.return_value = mock_loader
-
-        response = await client.get(
-            "/api/v1/dashboards/default",
-            params={"tenant_id": test_tenant_dash.tenant_id},
+    # Create real dashboard config object
+    dashboard_config = DashboardConfigRoot(
+        dashboard=DashboardConfig(
+            name="Default Dashboard",
+            description="Main operations dashboard",
+            refresh_interval=30,
+            layout=DashboardLayout(columns=12),
+            panels=[
+                DashboardPanelReference(
+                    id="cpu_usage",
+                    config_file="panels/cpu.yaml",
+                    position=PanelPosition(row=1, col=1, width=6, height=4)
+                )
+            ]
         )
+    )
 
-    # Clean up override
+    # Mock config loader
+    mock_loader = MagicMock()
+    mock_loader.load_dashboard_config.return_value = dashboard_config
+
+    def override_get_config_loader():
+        return mock_loader
+
+    app.dependency_overrides[get_current_active_user] = override_get_current_user
+    app.dependency_overrides[get_config_loader] = override_get_config_loader
+
+    response = await client.get(
+        "/api/v1/dashboards/default",
+        params={"tenant_id": test_tenant_dash.tenant_id},
+    )
+
+    # Clean up overrides
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(get_config_loader, None)
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -254,27 +279,31 @@ async def test_get_dashboard_not_found(
 
     # Mock authentication
     from app.auth.dependencies import get_current_active_user
+    from app.services.config_loader import get_config_loader
 
     async def override_get_current_user() -> User:
         return test_user_regular
 
-    app.dependency_overrides[get_current_active_user] = override_get_current_user
-
     # Mock config loader to raise ConfigNotFoundError
-    with patch("app.api.v1.dashboards.get_config_loader") as mock_get_loader:
-        mock_loader = MagicMock()
-        mock_loader.load_dashboard_config.side_effect = ConfigNotFoundError(
-            "Dashboard not found"
-        )
-        mock_get_loader.return_value = mock_loader
+    mock_loader = MagicMock()
+    mock_loader.load_dashboard_config.side_effect = ConfigNotFoundError(
+        "Dashboard not found"
+    )
 
-        response = await client.get(
-            "/api/v1/dashboards/nonexistent",
-            params={"tenant_id": test_tenant_dash.tenant_id},
-        )
+    def override_get_config_loader():
+        return mock_loader
 
-    # Clean up override
+    app.dependency_overrides[get_current_active_user] = override_get_current_user
+    app.dependency_overrides[get_config_loader] = override_get_config_loader
+
+    response = await client.get(
+        "/api/v1/dashboards/nonexistent",
+        params={"tenant_id": test_tenant_dash.tenant_id},
+    )
+
+    # Clean up overrides
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(get_config_loader, None)
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -291,32 +320,41 @@ async def test_get_dashboard_no_layout(
 
     # Mock authentication
     from app.auth.dependencies import get_current_active_user
+    from app.services.config_loader import get_config_loader
+    from app.schemas.config import DashboardConfigRoot, DashboardConfig
 
     async def override_get_current_user() -> User:
         return test_user_regular
 
-    app.dependency_overrides[get_current_active_user] = override_get_current_user
-
-    # Mock dashboard config without layout
-    with patch("app.api.v1.dashboards.get_config_loader") as mock_get_loader:
-        mock_loader = MagicMock()
-        mock_dashboard_config = MagicMock()
-        mock_dashboard_config.dashboard.name = "Simple Dashboard"
-        mock_dashboard_config.dashboard.description = None
-        mock_dashboard_config.dashboard.refresh_interval = 60
-        mock_dashboard_config.dashboard.layout = None  # No layout
-        mock_dashboard_config.dashboard.panels = []
-
-        mock_loader.load_dashboard_config.return_value = mock_dashboard_config
-        mock_get_loader.return_value = mock_loader
-
-        response = await client.get(
-            "/api/v1/dashboards/simple",
-            params={"tenant_id": test_tenant_dash.tenant_id},
+    # Create real dashboard config without layout
+    dashboard_config = DashboardConfigRoot(
+        dashboard=DashboardConfig(
+            name="Simple Dashboard",
+            description=None,
+            refresh_interval=60,
+            layout=None,  # No layout
+            panels=[]
         )
+    )
 
-    # Clean up override
+    # Mock config loader
+    mock_loader = MagicMock()
+    mock_loader.load_dashboard_config.return_value = dashboard_config
+
+    def override_get_config_loader():
+        return mock_loader
+
+    app.dependency_overrides[get_current_active_user] = override_get_current_user
+    app.dependency_overrides[get_config_loader] = override_get_config_loader
+
+    response = await client.get(
+        "/api/v1/dashboards/simple",
+        params={"tenant_id": test_tenant_dash.tenant_id},
+    )
+
+    # Clean up overrides
     app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(get_config_loader, None)
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
