@@ -1,15 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Plot from 'react-plotly.js'
-import { Maximize2 } from 'lucide-react'
-import { apiClient, PanelData } from '../../api/client'
+import { Maximize2, RefreshCw } from 'lucide-react'
 import type { DateRange } from '../DateFilter'
 import DrillDownModal from '../common/DrillDownModal'
+import { usePanelData, formatLastUpdated } from '../../api/queries'
 
 interface TimeSeriesPanelProps {
   panelId: string
   tenantId: string
   dateRange: DateRange
   title?: string
+  refreshInterval?: number // in seconds, defaults to 300 (5 min)
 }
 
 interface TimeSeriesData {
@@ -35,39 +36,21 @@ export default function TimeSeriesPanel({
   tenantId,
   dateRange,
   title,
+  refreshInterval = 300,
 }: TimeSeriesPanelProps) {
-  const [data, setData] = useState<PanelData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [showDrillDown, setShowDrillDown] = useState(false)
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!tenantId) return
+  // Use TanStack Query for data fetching with auto-refresh
+  const { data, isLoading, error, refetch, lastUpdated } = usePanelData(
+    { panelId, tenantId, dateRange },
+    refreshInterval
+  )
 
-      setLoading(true)
-      setError(null)
+  const handleManualRefresh = () => {
+    refetch()
+  }
 
-      try {
-        const params = {
-          date_from: dateRange.from?.toISOString(),
-          date_to: dateRange.to?.toISOString(),
-        }
-
-        const panelData = await apiClient.getPanelData(tenantId, panelId, params)
-        setData(panelData)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load panel data')
-        console.error('Failed to fetch time series data:', err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchData()
-  }, [panelId, tenantId, dateRange])
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div
@@ -83,7 +66,7 @@ export default function TimeSeriesPanel({
     return (
       <div className="bg-red-50 border border-red-200 rounded-md p-4">
         <p className="text-sm text-red-800">
-          <strong>Error:</strong> {error}
+          <strong>Error:</strong> {error instanceof Error ? error.message : 'Failed to load panel data'}
         </p>
       </div>
     )
@@ -132,15 +115,30 @@ export default function TimeSeriesPanel({
     <>
       <div className="w-full">
         <div className="flex items-center justify-between mb-4">
-          {title && <h3 className="text-lg font-medium text-gray-900">{title}</h3>}
-          <button
-            onClick={() => setShowDrillDown(true)}
-            className="flex items-center gap-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-            aria-label="Expand panel"
-          >
-            <Maximize2 size={16} />
-            <span>Expand</span>
-          </button>
+          <div>
+            {title && <h3 className="text-lg font-medium text-gray-900">{title}</h3>}
+            <p className="text-xs text-gray-500 mt-1">
+              Last updated: {formatLastUpdated(lastUpdated)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleManualRefresh}
+              className="flex items-center gap-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+              aria-label="Refresh data"
+              title="Refresh data"
+            >
+              <RefreshCw size={16} />
+            </button>
+            <button
+              onClick={() => setShowDrillDown(true)}
+              className="flex items-center gap-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+              aria-label="Expand panel"
+            >
+              <Maximize2 size={16} />
+              <span>Expand</span>
+            </button>
+          </div>
         </div>
         <Plot
         data={plotData}
