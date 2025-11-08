@@ -1,25 +1,28 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ProtectedRoute from '../../components/ProtectedRoute'
-import { AuthProvider } from '../../contexts/AuthContext'
+import * as AuthContext from '../../contexts/AuthContext'
 
 // Mock the useAuth hook
-vi.mock('../../contexts/AuthContext', async () => {
-  const actual = await vi.importActual('../../contexts/AuthContext')
-  return {
-    ...actual,
-    useAuth: vi.fn(),
-  }
-})
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: vi.fn(),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
 
 describe('ProtectedRoute', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('should show loading state while authenticating', () => {
-    const { useAuth } = require('../../contexts/AuthContext')
-    useAuth.mockReturnValue({
+    vi.mocked(AuthContext.useAuth).mockReturnValue({
       isAuthenticated: false,
       isLoading: true,
       user: null,
+      keycloak: null,
+      login: vi.fn(),
+      logout: vi.fn(),
     })
 
     render(
@@ -34,11 +37,20 @@ describe('ProtectedRoute', () => {
   })
 
   it('should render children when authenticated', () => {
-    const { useAuth } = require('../../contexts/AuthContext')
-    useAuth.mockReturnValue({
+    vi.mocked(AuthContext.useAuth).mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
-      user: { id: '1', email: 'test@example.com', is_admin: false },
+      user: {
+        id: '1',
+        email: 'test@example.com',
+        full_name: 'Test User',
+        keycloak_id: 'kc-1',
+        is_admin: false,
+        accessible_tenant_ids: [],
+      },
+      keycloak: null,
+      login: vi.fn(),
+      logout: vi.fn(),
     })
 
     render(
@@ -53,11 +65,20 @@ describe('ProtectedRoute', () => {
   })
 
   it('should show 403 error for non-admin users when requireAdmin is true', () => {
-    const { useAuth } = require('../../contexts/AuthContext')
-    useAuth.mockReturnValue({
+    vi.mocked(AuthContext.useAuth).mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
-      user: { id: '1', email: 'test@example.com', is_admin: false },
+      user: {
+        id: '1',
+        email: 'test@example.com',
+        full_name: 'Test User',
+        keycloak_id: 'kc-1',
+        is_admin: false,
+        accessible_tenant_ids: [],
+      },
+      keycloak: null,
+      login: vi.fn(),
+      logout: vi.fn(),
     })
 
     render(
@@ -75,11 +96,20 @@ describe('ProtectedRoute', () => {
   })
 
   it('should render children for admin users when requireAdmin is true', () => {
-    const { useAuth } = require('../../contexts/AuthContext')
-    useAuth.mockReturnValue({
+    vi.mocked(AuthContext.useAuth).mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
-      user: { id: '1', email: 'admin@example.com', is_admin: true },
+      user: {
+        id: '1',
+        email: 'admin@example.com',
+        full_name: 'Admin User',
+        keycloak_id: 'kc-1',
+        is_admin: true,
+        accessible_tenant_ids: [],
+      },
+      keycloak: null,
+      login: vi.fn(),
+      logout: vi.fn(),
     })
 
     render(

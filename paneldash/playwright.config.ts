@@ -1,16 +1,22 @@
 import { defineConfig, devices } from '@playwright/test'
+import * as dotenv from 'dotenv'
+
+// Load E2E environment variables
+dotenv.config({ path: './e2e.env' })
 
 export default defineConfig({
-  testDir: './tests/e2e',
-  fullyParallel: true,
+  testDir: './tests/e2e/specs',
+  fullyParallel: false, // Run serially to avoid conflicts
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1, // Single worker to avoid port conflicts
   reporter: 'html',
 
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: `http://${process.env.FRONTEND_HOST}:${process.env.FRONTEND_PORT}`,
     trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
 
   projects: [
@@ -20,18 +26,7 @@ export default defineConfig({
     },
   ],
 
-  webServer: [
-    {
-      command: 'cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000',
-      url: 'http://localhost:8000/health',
-      reuseExistingServer: !process.env.CI,
-      timeout: 30000,
-    },
-    {
-      command: 'cd frontend && npm run dev -- --host 0.0.0.0',
-      url: 'http://localhost:3000',
-      reuseExistingServer: !process.env.CI,
-      timeout: 30000,
-    },
-  ],
+  // Global setup to start all servers
+  globalSetup: require.resolve('./tests/e2e/global-setup.ts'),
+  globalTeardown: require.resolve('./tests/e2e/global-teardown.ts'),
 })

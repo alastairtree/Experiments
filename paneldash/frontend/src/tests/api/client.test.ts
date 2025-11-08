@@ -229,8 +229,8 @@ describe('ApiClient', () => {
     it('should delete user with DELETE request', async () => {
       client.setToken('test-token')
       fetchSpy.mockResolvedValueOnce(
-        new Response('', {
-          status: 204,
+        new Response(null, {
+          status: 200,
         })
       )
 

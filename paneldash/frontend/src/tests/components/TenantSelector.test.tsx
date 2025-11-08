@@ -1,17 +1,22 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TenantSelector from '../../components/TenantSelector'
+import * as TenantContext from '../../contexts/TenantContext'
 
 // Mock the useTenant hook
 vi.mock('../../contexts/TenantContext', () => ({
   useTenant: vi.fn(),
+  TenantProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 describe('TenantSelector', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('should show loading state while tenants are being fetched', () => {
-    const { useTenant } = require('../../contexts/TenantContext')
-    useTenant.mockReturnValue({
+    vi.mocked(TenantContext.useTenant).mockReturnValue({
       selectedTenant: null,
       setSelectedTenant: vi.fn(),
       tenants: [],
@@ -24,8 +29,7 @@ describe('TenantSelector', () => {
   })
 
   it('should show "No tenants available" when tenant list is empty', () => {
-    const { useTenant } = require('../../contexts/TenantContext')
-    useTenant.mockReturnValue({
+    vi.mocked(TenantContext.useTenant).mockReturnValue({
       selectedTenant: null,
       setSelectedTenant: vi.fn(),
       tenants: [],
@@ -43,8 +47,7 @@ describe('TenantSelector', () => {
       { id: '2', tenant_id: 't2', name: 'Tenant 2', is_active: true },
     ]
 
-    const { useTenant } = require('../../contexts/TenantContext')
-    useTenant.mockReturnValue({
+    vi.mocked(TenantContext.useTenant).mockReturnValue({
       selectedTenant: mockTenants[0],
       setSelectedTenant: vi.fn(),
       tenants: mockTenants,
@@ -64,8 +67,7 @@ describe('TenantSelector', () => {
       { id: '2', tenant_id: 't2', name: 'Tenant 2', is_active: true },
     ]
 
-    const { useTenant } = require('../../contexts/TenantContext')
-    useTenant.mockReturnValue({
+    vi.mocked(TenantContext.useTenant).mockReturnValue({
       selectedTenant: mockTenants[0],
       setSelectedTenant: mockSetSelectedTenant,
       tenants: mockTenants,
@@ -86,8 +88,7 @@ describe('TenantSelector', () => {
       { id: '1', tenant_id: 't1', name: 'Tenant 1', is_active: false },
     ]
 
-    const { useTenant } = require('../../contexts/TenantContext')
-    useTenant.mockReturnValue({
+    vi.mocked(TenantContext.useTenant).mockReturnValue({
       selectedTenant: mockTenants[0],
       setSelectedTenant: vi.fn(),
       tenants: mockTenants,
