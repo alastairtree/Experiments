@@ -4,6 +4,7 @@ import { useTenant } from '../contexts/TenantContext'
 import Header from '../components/Header'
 import DashboardGrid from '../components/DashboardGrid'
 import DateFilter, { DateRange } from '../components/DateFilter'
+import TimeSeriesPanel from '../components/panels/TimeSeriesPanel'
 import { apiClient, Dashboard as DashboardType } from '../api/client'
 
 export default function Dashboard() {
@@ -90,19 +91,12 @@ export default function Dashboard() {
                   columns={dashboard.layout?.columns || 12}
                 >
                   {panelRef => (
-                    <div>
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">{panelRef.id}</h3>
-                      <p className="text-sm text-gray-500 mb-4">Config: {panelRef.config_file}</p>
-                      <div className="bg-gray-100 rounded p-4 text-center">
-                        <p className="text-sm text-gray-600">
-                          Panel component will render here
-                        </p>
-                        <p className="text-xs text-gray-500 mt-2">
-                          Date range: {dateRange.from?.toLocaleString()} -{' '}
-                          {dateRange.to?.toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
+                    <TimeSeriesPanel
+                      panelId={panelRef.id}
+                      tenantId={selectedTenant.tenant_id}
+                      dateRange={dateRange}
+                      title={panelRef.id}
+                    />
                   )}
                 </DashboardGrid>
               ) : (
