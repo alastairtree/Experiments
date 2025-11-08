@@ -69,8 +69,30 @@ export default async function globalSetup() {
   console.log('\n=== Starting E2E Test Infrastructure ===\n')
 
   try {
-    // 1. Start Backend API
-    console.log('1. Starting Backend API...')
+    // 1. Start WireMock (Keycloak Mock)
+    console.log('1. Starting WireMock (Keycloak Mock)...')
+    const wiremockProc = startProcess(
+      'wiremock',
+      'java',
+      [
+        '-jar',
+        join(ROOT_DIR, 'tests/e2e/wiremock/wiremock-standalone.jar'),
+        '--port',
+        process.env.WIREMOCK_PORT || '8081',
+        '--root-dir',
+        join(ROOT_DIR, 'tests/e2e/wiremock'),
+        '--global-response-templating',
+      ],
+      ROOT_DIR,
+      {}
+    )
+
+    // Wait for WireMock to be ready
+    await waitForUrl(`http://localhost:${process.env.WIREMOCK_PORT || 8081}/__admin/`)
+    console.log('✓ WireMock ready\n')
+
+    // 2. Start Backend API
+    console.log('2. Starting Backend API...')
     const backendProc = startProcess(
       'backend',
       'uv',
@@ -88,6 +110,9 @@ export default async function globalSetup() {
         // Backend will use environment variables or defaults
         ...(process.env.CENTRAL_DB_HOST && { CENTRAL_DB_HOST: process.env.CENTRAL_DB_HOST }),
         ...(process.env.CENTRAL_DB_PORT && { CENTRAL_DB_PORT: process.env.CENTRAL_DB_PORT }),
+        KEYCLOAK_SERVER_URL: process.env.KEYCLOAK_SERVER_URL || 'http://localhost:8081',
+        KEYCLOAK_REALM: process.env.KEYCLOAK_REALM || 'paneldash',
+        KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID || 'paneldash-api',
       }
     )
 
@@ -95,8 +120,8 @@ export default async function globalSetup() {
     await waitForUrl(`http://localhost:${process.env.BACKEND_PORT || 8001}/health`)
     console.log('✓ Backend API ready\n')
 
-    // 2. Start Frontend
-    console.log('2. Starting Frontend...')
+    // 3. Start Frontend
+    console.log('3. Starting Frontend...')
     const frontendProc = startProcess(
       'frontend',
       'npm',
@@ -112,7 +137,9 @@ export default async function globalSetup() {
       join(ROOT_DIR, 'frontend'),
       {
         VITE_API_URL: process.env.VITE_API_URL || 'http://localhost:8001',
-        ...(process.env.VITE_KEYCLOAK_URL && { VITE_KEYCLOAK_URL: process.env.VITE_KEYCLOAK_URL }),
+        VITE_KEYCLOAK_URL: process.env.VITE_KEYCLOAK_URL || 'http://localhost:8081',
+        VITE_KEYCLOAK_REALM: process.env.VITE_KEYCLOAK_REALM || 'paneldash',
+        VITE_KEYCLOAK_CLIENT_ID: process.env.VITE_KEYCLOAK_CLIENT_ID || 'paneldash-frontend',
       }
     )
 

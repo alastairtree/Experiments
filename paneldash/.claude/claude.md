@@ -154,13 +154,13 @@ All acceptance criteria met:
 # Backend (ALL must pass)
 cd backend
 uv run ruff check .      # Linting
-uv run mypy .            # Type checking
+uv run mypy .            # Type checking - REQUIRED, must pass with no errors
 uv run pytest            # Tests (52 tests)
 
 # Frontend (ALL must pass)
 cd ../frontend
 npm run lint             # ESLint
-npm run type-check       # TypeScript checking
+npm run type-check       # TypeScript checking - REQUIRED, must pass with no errors
 npm run test -- --run    # Tests (24 tests)
 
 # E2E (ALL must pass)
@@ -169,6 +169,13 @@ npm run test:e2e         # Playwright tests (8 tests)
 ```
 
 **Total Checks:** 6 linting/type checks + 3 test suites (84 tests)
+
+**Type Checking Policy:**
+- Backend: `mypy .` must always be run and pass with 0 errors
+- Frontend: `npm run type-check` must always be run and pass with 0 errors
+- Type checking is MANDATORY for every commit, not optional
+- No `any` types without documented justification
+- All type errors must be fixed before committing
 
 If ANY check fails, fix it before committing. No exceptions.
 
