@@ -146,9 +146,6 @@ jobs:
         working-directory: ./paneldash
         run: npx playwright install --with-deps chromium
 
-      - name: Create screenshots directory
-        run: mkdir -p paneldash/test-results/screenshots
-
       - name: Run database migrations
         working-directory: ./paneldash/backend
         env:
@@ -196,51 +193,35 @@ jobs:
       - name: Run E2E tests
         working-directory: ./paneldash
         env:
+          CI: true
           FRONTEND_HOST: localhost
           FRONTEND_PORT: 5174
           BACKEND_HOST: localhost
           BACKEND_PORT: 8001
-        run: npx playwright test --reporter=html,list
+        run: npx playwright test
 
-      - name: Collect and organize screenshots
-        if: always()
-        run: |
-          mkdir -p paneldash/e2e-screenshots
-          # Copy screenshots from test results
-          find paneldash/test-results -name "*.png" -exec cp {} paneldash/e2e-screenshots/ \;
-          # Copy screenshots from playwright test results
-          find paneldash/playwright-report -name "*.png" -exec cp {} paneldash/e2e-screenshots/ \; 2>/dev/null || true
-          # List all screenshots
-          ls -lah paneldash/e2e-screenshots/
-
-      - name: Create screenshots archive
-        if: always()
-        run: |
-          cd paneldash
-          zip -r e2e-screenshots.zip e2e-screenshots/ || true
-
-      - name: Upload E2E screenshots as artifact
+      - name: Upload Playwright HTML report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-screenshots
-          path: paneldash/e2e-screenshots.zip
+          name: playwright-html-report
+          path: paneldash/tests/e2e/playwright-report/
           retention-days: 30
 
-      - name: Upload Playwright report
+      - name: Upload test results (screenshots, videos, traces)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: paneldash/playwright-report/
+          name: e2e-test-results
+          path: paneldash/tests/e2e/test-results/
           retention-days: 30
 
-      - name: Upload test results
+      - name: Upload JUnit test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
-          path: paneldash/test-results/
+          name: junit-results
+          path: paneldash/tests/e2e/junit-results.xml
           retention-days: 30
 
   summary:

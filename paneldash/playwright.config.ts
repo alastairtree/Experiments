@@ -10,16 +10,27 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1, // Single worker to avoid port conflicts
+
+  // Output directories for artifacts
+  outputDir: './tests/e2e/test-results',
+
   reporter: [
-    ['html'],
+    ['html', { outputFolder: './tests/e2e/playwright-report' }],
     ['list'],
+    ['junit', { outputFile: './tests/e2e/junit-results.xml' }],
   ],
 
   use: {
     baseURL: `http://${process.env.FRONTEND_HOST}:${process.env.FRONTEND_PORT}`,
-    trace: 'on-first-retry',
-    screenshot: 'on', // Always capture screenshots
-    video: 'on', // Always record video
+
+    // Trace: capture detailed debugging info on failure
+    trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
+
+    // Screenshots: capture on failure (or all in CI for debugging)
+    screenshot: process.env.CI ? 'on' : 'only-on-failure',
+
+    // Video: only retain on failure to save space
+    video: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
   },
 
   projects: [
