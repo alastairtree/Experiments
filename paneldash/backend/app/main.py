@@ -35,6 +35,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Import routers
+from app.api.v1 import auth, tenants, users  # noqa: E402
+
+# Register API v1 routers
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(tenants.router, prefix="/api/v1")
+app.include_router(users.router, prefix="/api/v1")
+
 
 @app.get("/health")
 async def health_check() -> dict[str, str]:

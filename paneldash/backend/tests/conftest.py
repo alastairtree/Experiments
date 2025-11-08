@@ -8,7 +8,7 @@ from tempfile import mkdtemp
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from pgserver import get_server
+from pgserver import get_server  # type: ignore[attr-defined]
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -43,7 +43,7 @@ def postgres_server() -> Generator:  # type: ignore[type-arg]
 def test_db_url(postgres_server) -> str:  # type: ignore[no-untyped-def]
     """Get the test database URL."""
     # Get the connection URI from the server
-    uri = postgres_server.get_uri()
+    uri: str = postgres_server.get_uri()
 
     # Convert to asyncpg format (replace postgresql:// with postgresql+asyncpg://)
     return uri.replace("postgresql://", "postgresql+asyncpg://")
