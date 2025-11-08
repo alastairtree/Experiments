@@ -3,7 +3,8 @@ import { ApiClient } from '../../api/client'
 
 describe('ApiClient', () => {
   let client: ApiClient
-  let fetchSpy: ReturnType<typeof vi.spyOn>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let fetchSpy: any
 
   beforeEach(() => {
     client = new ApiClient('http://test-api')

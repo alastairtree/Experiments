@@ -147,16 +147,30 @@ All acceptance criteria met:
 ```
 
 **Before Committing:**
+
+**CRITICAL:** All of the following checks MUST pass before committing:
+
 ```bash
-# Backend
-cd backend && uv run ruff check . && uv run mypy . && uv run pytest
+# Backend (ALL must pass)
+cd backend
+uv run ruff check .      # Linting
+uv run mypy .            # Type checking
+uv run pytest            # Tests (52 tests)
 
-# Frontend
-cd frontend && npm run lint && npm run type-check && npm run test
+# Frontend (ALL must pass)
+cd ../frontend
+npm run lint             # ESLint
+npm run type-check       # TypeScript checking
+npm run test -- --run    # Tests (24 tests)
 
-# E2E
-cd .. && npm run test:e2e
+# E2E (ALL must pass)
+cd ..
+npm run test:e2e         # Playwright tests (8 tests)
 ```
+
+**Total Checks:** 6 linting/type checks + 3 test suites (84 tests)
+
+If ANY check fails, fix it before committing. No exceptions.
 
 ## Project Status
 

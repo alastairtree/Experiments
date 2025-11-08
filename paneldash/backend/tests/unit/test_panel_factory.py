@@ -1,6 +1,7 @@
 """Unit tests for panel factory service."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -77,7 +78,7 @@ class TestPanelRegistry:
     ) -> None:
         """Test that unknown panel types raise UnknownPanelTypeError."""
         # Create a fake panel type that's not registered
-        fake_type = "fake_panel_type"  # type: ignore
+        fake_type: Any = "fake_panel_type"
 
         with pytest.raises(UnknownPanelTypeError) as exc_info:
             panel_registry.get_panel_class(fake_type)
@@ -194,7 +195,7 @@ class TestPanelFactory:
 
         panel = panel_factory.create_panel("test-panel", config)
         # Note: fetch_data requires db connection, but we're testing structure
-        data = await panel.fetch_data(None)  # type: ignore
+        data = await panel.fetch_data(None)
 
         assert "type" in data
         assert data["type"] == "timeseries"
