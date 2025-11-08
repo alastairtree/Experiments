@@ -210,14 +210,14 @@ async def test_get_dashboard_success(
 
     # Mock authentication
     from app.auth.dependencies import get_current_active_user
-    from app.services.config_loader import get_config_loader
     from app.schemas.config import (
-        DashboardConfigRoot,
         DashboardConfig,
+        DashboardConfigRoot,
         DashboardLayout,
         DashboardPanelReference,
-        PanelPosition
+        PanelPosition,
     )
+    from app.services.config_loader import get_config_loader
 
     async def override_get_current_user() -> User:
         return test_user_regular
@@ -320,8 +320,8 @@ async def test_get_dashboard_no_layout(
 
     # Mock authentication
     from app.auth.dependencies import get_current_active_user
+    from app.schemas.config import DashboardConfig, DashboardConfigRoot
     from app.services.config_loader import get_config_loader
-    from app.schemas.config import DashboardConfigRoot, DashboardConfig
 
     async def override_get_current_user() -> User:
         return test_user_regular

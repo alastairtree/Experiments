@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
 from app.models.central import Tenant, User, UserTenant
-from app.schemas.config import PanelType
 
 
 @pytest.fixture
@@ -107,10 +106,10 @@ async def test_get_timeseries_panel_data(
     await db_session.commit()
 
     from app.auth.dependencies import get_current_active_user
+    from app.schemas.config import TimeSeriesDataSource, TimeSeriesPanelConfig
     from app.services.config_loader import get_config_loader
-    from app.services.query_builder import get_query_builder
     from app.services.data_aggregator import get_data_aggregator
-    from app.schemas.config import TimeSeriesPanelConfig, TimeSeriesDataSource
+    from app.services.query_builder import get_query_builder
 
     async def override_get_current_user() -> User:
         return panel_test_user
@@ -185,9 +184,9 @@ async def test_get_kpi_panel_data(
     await db_session.commit()
 
     from app.auth.dependencies import get_current_active_user
+    from app.schemas.config import KPIDataSource, KPIDisplay, KPIPanelConfig
     from app.services.config_loader import get_config_loader
     from app.services.query_builder import get_query_builder
-    from app.schemas.config import KPIPanelConfig, KPIDataSource, KPIDisplay
 
     async def override_get_current_user() -> User:
         return panel_test_user
@@ -247,14 +246,14 @@ async def test_get_health_status_panel_data(
     await db_session.commit()
 
     from app.auth.dependencies import get_current_active_user
-    from app.services.config_loader import get_config_loader
-    from app.services.query_builder import get_query_builder
     from app.schemas.config import (
-        HealthStatusPanelConfig,
         HealthStatusDataSource,
         HealthStatusDisplay,
-        HealthStatusMapping
+        HealthStatusMapping,
+        HealthStatusPanelConfig,
     )
+    from app.services.config_loader import get_config_loader
+    from app.services.query_builder import get_query_builder
 
     async def override_get_current_user() -> User:
         return panel_test_user
@@ -318,14 +317,9 @@ async def test_get_table_panel_data(
     await db_session.commit()
 
     from app.auth.dependencies import get_current_active_user
+    from app.schemas.config import TableColumn, TableDataSource, TableDisplay, TablePanelConfig
     from app.services.config_loader import get_config_loader
     from app.services.query_builder import get_query_builder
-    from app.schemas.config import (
-        TablePanelConfig,
-        TableDataSource,
-        TableDisplay,
-        TableColumn
-    )
 
     async def override_get_current_user() -> User:
         return panel_test_user
