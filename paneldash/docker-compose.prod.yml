@@ -1,0 +1,117 @@
+services:
+  # PostgreSQL - Central Database
+  postgres-central:
+    image: postgres:16-alpine
+    container_name: paneldash-postgres-central
+    environment:
+      POSTGRES_DB: ${CENTRAL_DB_NAME:-paneldash_central}
+      POSTGRES_USER: ${CENTRAL_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${CENTRAL_DB_PASSWORD}
+    volumes:
+      - postgres-central-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CENTRAL_DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - paneldash
+    restart: unless-stopped
+
+  # PostgreSQL - Tenant Database
+  postgres-tenant:
+    image: postgres:16-alpine
+    container_name: paneldash-postgres-tenant
+    environment:
+      POSTGRES_DB: tenant_alpha
+      POSTGRES_USER: ${CENTRAL_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${CENTRAL_DB_PASSWORD}
+    volumes:
+      - postgres-tenant-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CENTRAL_DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - paneldash
+    restart: unless-stopped
+
+  # Keycloak
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: paneldash-keycloak
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres-central:5432/keycloak
+      KC_DB_USERNAME: ${CENTRAL_DB_USER:-postgres}
+      KC_DB_PASSWORD: ${CENTRAL_DB_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME}
+      KC_PROXY: edge
+    command: start
+    depends_on:
+      postgres-central:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nhost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - paneldash
+    restart: unless-stopped
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/backend.Dockerfile
+    container_name: paneldash-backend
+    environment:
+      DEBUG: "false"
+      CENTRAL_DB_HOST: postgres-central
+      CENTRAL_DB_PORT: 5432
+      CENTRAL_DB_NAME: ${CENTRAL_DB_NAME:-paneldash_central}
+      CENTRAL_DB_USER: ${CENTRAL_DB_USER:-postgres}
+      CENTRAL_DB_PASSWORD: ${CENTRAL_DB_PASSWORD}
+      KEYCLOAK_SERVER_URL: ${KEYCLOAK_SERVER_URL}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-paneldash}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-paneldash-api}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+    depends_on:
+      postgres-central:
+        condition: service_healthy
+      postgres-tenant:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      - paneldash
+    restart: unless-stopped
+
+  # Frontend with Nginx
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
+      target: production
+    container_name: paneldash-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - paneldash
+    restart: unless-stopped
+
+volumes:
+  postgres-central-data:
+  postgres-tenant-data:
+
+networks:
+  paneldash:
+    driver: bridge
