@@ -1,0 +1,261 @@
+name: CI Tests
+
+on:
+  push:
+    branches: [main, master, develop, 'claude/**']
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  backend-tests:
+    name: Backend Tests & Linting
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: paneldash_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install backend dependencies
+        working-directory: ./paneldash/backend
+        run: uv sync
+
+      - name: Run backend linting
+        working-directory: ./paneldash/backend
+        run: |
+          uv run ruff check .
+          uv run mypy . --ignore-missing-imports
+
+      - name: Run backend tests with coverage
+        working-directory: ./paneldash/backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/paneldash_test
+        run: |
+          uv run pytest --cov=app --cov-report=xml --cov-report=html --cov-report=term-missing tests/
+
+      - name: Upload backend coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-report
+          path: paneldash/backend/htmlcov/
+
+  frontend-tests:
+    name: Frontend Tests & Linting
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: paneldash/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./paneldash/frontend
+        run: npm ci
+
+      - name: Run frontend linting
+        working-directory: ./paneldash/frontend
+        run: npm run lint
+
+      - name: Run frontend tests with coverage
+        working-directory: ./paneldash/frontend
+        run: npm test -- --run --coverage
+
+      - name: Upload frontend coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-report
+          path: paneldash/frontend/coverage/
+
+  e2e-tests:
+    name: E2E Tests with Screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: paneldash_dev
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: paneldash/frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: ./paneldash/backend
+        run: uv sync
+
+      - name: Install frontend dependencies
+        working-directory: ./paneldash/frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: ./paneldash
+        run: npx playwright install --with-deps chromium
+
+      - name: Create screenshots directory
+        run: mkdir -p paneldash/test-results/screenshots
+
+      - name: Run database migrations
+        working-directory: ./paneldash/backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/paneldash_dev
+          CENTRAL_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/paneldash_dev
+        run: uv run alembic upgrade head
+
+      - name: Seed test data
+        working-directory: ./paneldash/backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/paneldash_dev
+          CENTRAL_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/paneldash_dev
+        run: |
+          # Add seed script if it exists
+          if [ -f "scripts/seed_test_data.py" ]; then
+            uv run python scripts/seed_test_data.py
+          fi
+
+      - name: Start backend server
+        working-directory: ./paneldash/backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/paneldash_dev
+          CENTRAL_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/paneldash_dev
+          KEYCLOAK_ENABLED: "false"
+        run: |
+          uv run uvicorn app.main:app --host 0.0.0.0 --port 8001 &
+          sleep 5
+          # Wait for backend to be ready
+          timeout 30 bash -c 'until curl -f http://localhost:8001/health; do sleep 1; done'
+
+      - name: Build frontend
+        working-directory: ./paneldash/frontend
+        env:
+          VITE_API_URL: http://localhost:8001
+        run: npm run build
+
+      - name: Start frontend server
+        working-directory: ./paneldash/frontend
+        run: |
+          npx vite preview --port 5174 --host 0.0.0.0 &
+          sleep 3
+          # Wait for frontend to be ready
+          timeout 30 bash -c 'until curl -f http://localhost:5174; do sleep 1; done'
+
+      - name: Run E2E tests
+        working-directory: ./paneldash
+        env:
+          FRONTEND_HOST: localhost
+          FRONTEND_PORT: 5174
+          BACKEND_HOST: localhost
+          BACKEND_PORT: 8001
+        run: npx playwright test --reporter=html,list
+
+      - name: Collect and organize screenshots
+        if: always()
+        run: |
+          mkdir -p paneldash/e2e-screenshots
+          # Copy screenshots from test results
+          find paneldash/test-results -name "*.png" -exec cp {} paneldash/e2e-screenshots/ \;
+          # Copy screenshots from playwright test results
+          find paneldash/playwright-report -name "*.png" -exec cp {} paneldash/e2e-screenshots/ \; 2>/dev/null || true
+          # List all screenshots
+          ls -lah paneldash/e2e-screenshots/
+
+      - name: Create screenshots archive
+        if: always()
+        run: |
+          cd paneldash
+          zip -r e2e-screenshots.zip e2e-screenshots/ || true
+
+      - name: Upload E2E screenshots as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: paneldash/e2e-screenshots.zip
+          retention-days: 30
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: paneldash/playwright-report/
+          retention-days: 30
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: paneldash/test-results/
+          retention-days: 30
+
+  summary:
+    name: Test Summary
+    needs: [backend-tests, frontend-tests, e2e-tests]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          echo "Backend tests: ${{ needs.backend-tests.result }}"
+          echo "Frontend tests: ${{ needs.frontend-tests.result }}"
+          echo "E2E tests: ${{ needs.e2e-tests.result }}"
+
+      - name: Set final status
+        if: needs.backend-tests.result != 'success' || needs.frontend-tests.result != 'success' || needs.e2e-tests.result != 'success'
+        run: exit 1

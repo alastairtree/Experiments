@@ -10,13 +10,16 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1, // Single worker to avoid port conflicts
-  reporter: 'html',
+  reporter: [
+    ['html'],
+    ['list'],
+  ],
 
   use: {
     baseURL: `http://${process.env.FRONTEND_HOST}:${process.env.FRONTEND_PORT}`,
     trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    screenshot: 'on', // Always capture screenshots
+    video: 'on', // Always record video
   },
 
   projects: [
