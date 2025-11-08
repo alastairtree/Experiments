@@ -107,15 +107,20 @@ test.describe('Valid User Authentication', () => {
 
   test('authenticated user can create tenant', async ({ request }) => {
     // Create a tenant using admin token
-    const response = await request.post('http://localhost:8001/api/v1/tenants', {
+    const tenantId = `e2e-test-${Date.now()}`
+    const response = await request.post('http://localhost:8001/api/v1/tenants/', {
       headers: {
         Authorization: `Bearer ${adminToken}`,
         'Content-Type': 'application/json',
       },
       data: {
+        tenant_id: tenantId,
         name: 'E2E Test Tenant',
-        config_path: `/config/tenants/e2e-test-${Date.now()}`,
-        is_active: true,
+        database_name: `tenant_${tenantId}`,
+        database_host: 'localhost',
+        database_port: 5432,
+        database_user: 'postgres',
+        database_password: 'postgres',
       },
     })
 
@@ -156,15 +161,20 @@ test.describe('Valid User Authentication', () => {
     const userId = userData.id
 
     // Create a tenant
-    const tenantResponse = await request.post('http://localhost:8001/api/v1/tenants', {
+    const assignTenantId = `assign-test-${Date.now()}`
+    const tenantResponse = await request.post('http://localhost:8001/api/v1/tenants/', {
       headers: {
         Authorization: `Bearer ${adminToken}`,
         'Content-Type': 'application/json',
       },
       data: {
+        tenant_id: assignTenantId,
         name: 'Assignment Test Tenant',
-        config_path: `/config/tenants/assignment-test-${Date.now()}`,
-        is_active: true,
+        database_name: `tenant_${assignTenantId}`,
+        database_host: 'localhost',
+        database_port: 5432,
+        database_user: 'postgres',
+        database_password: 'postgres',
       },
     })
     const tenant = await tenantResponse.json()
