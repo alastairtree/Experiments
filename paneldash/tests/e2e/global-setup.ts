@@ -1,7 +1,9 @@
 import { spawn, ChildProcess } from 'child_process'
-import { writeFileSync } from 'fs'
+import { writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import * as dotenv from 'dotenv'
+import { createWriteStream } from 'fs'
+import { pipeline } from 'stream/promises'
 
 // Load E2E environment
 dotenv.config({ path: join(__dirname, '../../e2e.env') })
@@ -11,6 +13,10 @@ const ROOT_DIR = join(__dirname, '../..')
 
 // Database connection details (will be set by pgserver)
 let dbConnectionDetails: { host: string; port: number } = { host: 'localhost', port: 5433 }
+
+// WireMock configuration
+const WIREMOCK_VERSION = '3.3.1'
+const WIREMOCK_JAR_URL = `https://repo1.maven.org/maven2/org/wiremock/wiremock-standalone/${WIREMOCK_VERSION}/wiremock-standalone-${WIREMOCK_VERSION}.jar`
 
 async function waitForUrl(url: string, timeout = 60000): Promise<void> {
   const start = Date.now()
@@ -27,6 +33,31 @@ async function waitForUrl(url: string, timeout = 60000): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 1000))
   }
   throw new Error(`Timeout waiting for ${url}`)
+}
+
+async function downloadWireMockJar(jarPath: string): Promise<void> {
+  if (existsSync(jarPath)) {
+    console.log('✓ WireMock jar already exists')
+    return
+  }
+
+  console.log(`Downloading WireMock ${WIREMOCK_VERSION}...`)
+  const response = await fetch(WIREMOCK_JAR_URL)
+
+  if (!response.ok) {
+    throw new Error(`Failed to download WireMock: ${response.statusText}`)
+  }
+
+  // Ensure directory exists
+  const dir = join(jarPath, '..')
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+
+  // Download the jar
+  const fileStream = createWriteStream(jarPath)
+  await pipeline(response.body as any, fileStream)
+  console.log('✓ WireMock jar downloaded successfully')
 }
 
 function startProcess(
@@ -164,12 +195,15 @@ export default async function globalSetup() {
 
     // 3. Start WireMock (Keycloak Mock)
     console.log('3. Starting WireMock (Keycloak Mock)...')
+    const wiremockJarPath = join(ROOT_DIR, 'tests/e2e/wiremock/wiremock-standalone.jar')
+    await downloadWireMockJar(wiremockJarPath)
+
     const wiremockProc = startProcess(
       'wiremock',
       'java',
       [
         '-jar',
-        join(ROOT_DIR, 'tests/e2e/wiremock/wiremock-standalone.jar'),
+        wiremockJarPath,
         '--port',
         process.env.WIREMOCK_PORT || '8081',
         '--root-dir',
