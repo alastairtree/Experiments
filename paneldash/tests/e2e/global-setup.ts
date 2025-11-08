@@ -42,11 +42,15 @@ function startProcess(
   })
 
   proc.stdout?.on('data', (data) => {
-    console.log(`[${name}] ${data.toString().trim()}`)
+    const output = data.toString().trim()
+    if (output) console.log(`[${name}] ${output}`)
   })
 
   proc.stderr?.on('data', (data) => {
-    console.error(`[${name}] ${data.toString().trim()}`)
+    const output = data.toString().trim()
+    if (output && !output.includes('Warning:')) {
+      console.error(`[${name}] ${output}`)
+    }
   })
 
   proc.on('error', (error) => {
@@ -65,56 +69,8 @@ export default async function globalSetup() {
   console.log('\n=== Starting E2E Test Infrastructure ===\n')
 
   try {
-    // 1. Start pgserver (test database)
-    console.log('1. Starting pgserver...')
-    const dbProc = startProcess(
-      'pgserver',
-      'python',
-      ['-m', 'pgserver', '--port', process.env.CENTRAL_DB_PORT!],
-      join(ROOT_DIR, 'backend'),
-      {}
-    )
-
-    // Give database time to initialize
-    await new Promise((resolve) => setTimeout(resolve, 5000))
-    console.log('✓ Database ready\n')
-
-    // 2. Download and start WireMock
-    console.log('2. Starting WireMock...')
-    // Check if wiremock jar exists, if not download it
-    const wiremockJar = join(ROOT_DIR, 'tests/e2e/wiremock/wiremock-standalone.jar')
-    try {
-      require('fs').statSync(wiremockJar)
-    } catch {
-      console.log('Downloading WireMock...')
-      const { execSync } = require('child_process')
-      execSync(
-        `curl -L https://repo1.maven.org/maven2/org/wiremock/wiremock-standalone/3.3.1/wiremock-standalone-3.3.1.jar -o ${wiremockJar}`,
-        { stdio: 'inherit' }
-      )
-    }
-
-    const wiremockProc = startProcess(
-      'wiremock',
-      'java',
-      [
-        '-jar',
-        wiremockJar,
-        '--port',
-        process.env.WIREMOCK_PORT!,
-        '--root-dir',
-        join(ROOT_DIR, 'tests/e2e/wiremock'),
-      ],
-      ROOT_DIR,
-      {}
-    )
-
-    // Wait for WireMock to be ready
-    await waitForUrl(`http://localhost:${process.env.WIREMOCK_PORT}/__admin/`)
-    console.log('✓ WireMock ready\n')
-
-    // 3. Start Backend API
-    console.log('3. Starting Backend API...')
+    // 1. Start Backend API
+    console.log('1. Starting Backend API...')
     const backendProc = startProcess(
       'backend',
       'uv',
@@ -123,44 +79,45 @@ export default async function globalSetup() {
         'uvicorn',
         'app.main:app',
         '--host',
-        process.env.BACKEND_HOST!,
+        process.env.BACKEND_HOST || 'localhost',
         '--port',
-        process.env.BACKEND_PORT!,
+        process.env.BACKEND_PORT || '8001',
       ],
       join(ROOT_DIR, 'backend'),
       {
-        CENTRAL_DB_HOST: process.env.CENTRAL_DB_HOST!,
-        CENTRAL_DB_PORT: process.env.CENTRAL_DB_PORT!,
-        CENTRAL_DB_NAME: process.env.CENTRAL_DB_NAME!,
-        CENTRAL_DB_USER: process.env.CENTRAL_DB_USER!,
-        CENTRAL_DB_PASSWORD: process.env.CENTRAL_DB_PASSWORD!,
-        KEYCLOAK_SERVER_URL: process.env.KEYCLOAK_SERVER_URL!,
-        KEYCLOAK_REALM: process.env.KEYCLOAK_REALM!,
-        KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID!,
+        // Backend will use environment variables or defaults
+        ...(process.env.CENTRAL_DB_HOST && { CENTRAL_DB_HOST: process.env.CENTRAL_DB_HOST }),
+        ...(process.env.CENTRAL_DB_PORT && { CENTRAL_DB_PORT: process.env.CENTRAL_DB_PORT }),
       }
     )
 
     // Wait for backend to be ready
-    await waitForUrl(`http://localhost:${process.env.BACKEND_PORT}/health`)
+    await waitForUrl(`http://localhost:${process.env.BACKEND_PORT || 8001}/health`)
     console.log('✓ Backend API ready\n')
 
-    // 4. Start Frontend
-    console.log('4. Starting Frontend...')
+    // 2. Start Frontend
+    console.log('2. Starting Frontend...')
     const frontendProc = startProcess(
       'frontend',
       'npm',
-      ['run', 'dev', '--', '--host', process.env.FRONTEND_HOST!, '--port', process.env.FRONTEND_PORT!],
+      [
+        'run',
+        'dev',
+        '--',
+        '--host',
+        process.env.FRONTEND_HOST || 'localhost',
+        '--port',
+        process.env.FRONTEND_PORT || '5174',
+      ],
       join(ROOT_DIR, 'frontend'),
       {
-        VITE_API_URL: process.env.VITE_API_URL!,
-        VITE_KEYCLOAK_URL: process.env.VITE_KEYCLOAK_URL!,
-        VITE_KEYCLOAK_REALM: process.env.VITE_KEYCLOAK_REALM!,
-        VITE_KEYCLOAK_CLIENT_ID: process.env.VITE_KEYCLOAK_CLIENT_ID!,
+        VITE_API_URL: process.env.VITE_API_URL || 'http://localhost:8001',
+        ...(process.env.VITE_KEYCLOAK_URL && { VITE_KEYCLOAK_URL: process.env.VITE_KEYCLOAK_URL }),
       }
     )
 
     // Wait for frontend to be ready
-    await waitForUrl(`http://localhost:${process.env.FRONTEND_PORT}`)
+    await waitForUrl(`http://localhost:${process.env.FRONTEND_PORT || 5174}`)
     console.log('✓ Frontend ready\n')
 
     // Save process IDs for teardown

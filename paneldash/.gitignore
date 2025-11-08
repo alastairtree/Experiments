@@ -94,3 +94,4 @@ alembic/versions/*.pyc
 # Coverage
 .coverage.*
 coverage/
+tests/e2e/wiremock/wiremock-standalone.jar
