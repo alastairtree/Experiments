@@ -1,21 +1,39 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider } from './contexts/AuthContext'
+import { TenantProvider } from './contexts/TenantContext'
+import ProtectedRoute from './components/ProtectedRoute'
+import Login from './pages/Login'
+import Dashboard from './pages/Dashboard'
+import Admin from './pages/Admin'
 import Health from './pages/Health'
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Routes>
-        <Route path="/health" element={<Health />} />
-        <Route path="/" element={
-          <div className="flex items-center justify-center min-h-screen">
-            <div className="text-center">
-              <h1 className="text-4xl font-bold text-gray-900 mb-4">PanelDash</h1>
-              <p className="text-gray-600">Multi-tenant Operations Dashboard</p>
-            </div>
-          </div>
-        } />
-      </Routes>
-    </div>
+    <AuthProvider>
+      <TenantProvider>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/health" element={<Health />} />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute requireAdmin>
+                <Admin />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </TenantProvider>
+    </AuthProvider>
   )
 }
 
