@@ -88,7 +88,7 @@ export async function assignUserToTenant(
   const apiContext = await request.newContext()
 
   try {
-    const response = await apiContext.post(`${API_URL}/api/v1/users/${userId}/tenants/${tenantId}`, {
+    const response = await apiContext.post(`${API_URL}/api/v1/tenants/${tenantId}/users/${userId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },

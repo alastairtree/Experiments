@@ -182,7 +182,7 @@ test.describe('Valid User Authentication', () => {
 
     // Assign user to tenant
     const assignResponse = await request.post(
-      `http://localhost:8001/api/v1/users/${userId}/tenants/${tenantId}`,
+      `http://localhost:8001/api/v1/tenants/${tenantId}/users/${userId}`,
       {
         headers: {
           Authorization: `Bearer ${adminToken}`,
