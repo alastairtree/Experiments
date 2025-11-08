@@ -10,6 +10,11 @@ vi.mock('../../api/client', () => ({
   },
 }))
 
+// Mock the DrillDownModal component
+vi.mock('../../components/common/DrillDownModal', () => ({
+  default: () => null,
+}))
+
 describe('TablePanel', () => {
   const mockDateRange = {
     from: new Date('2024-01-01T00:00:00Z'),

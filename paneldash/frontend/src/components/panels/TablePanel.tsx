@@ -8,8 +8,10 @@ import {
   flexRender,
   SortingState,
 } from '@tanstack/react-table'
+import { Maximize2 } from 'lucide-react'
 import { apiClient, PanelData } from '../../api/client'
 import type { DateRange } from '../DateFilter'
+import DrillDownModal from '../common/DrillDownModal'
 
 interface TablePanelProps {
   panelId: string
@@ -59,6 +61,7 @@ export default function TablePanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sorting, setSorting] = useState<SortingState>([])
+  const [showDrillDown, setShowDrillDown] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
 
   useEffect(() => {
@@ -187,12 +190,21 @@ export default function TablePanel({
   const pagination = tableData.pagination
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white">
-      {title && (
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="text-lg font-medium text-gray-900">{title}</h3>
-        </div>
-      )}
+    <>
+      <div className="rounded-lg border border-gray-200 bg-white">
+        {title && (
+          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+            <h3 className="text-lg font-medium text-gray-900">{title}</h3>
+            <button
+              onClick={() => setShowDrillDown(true)}
+              className="flex items-center gap-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+              aria-label="Expand panel"
+            >
+              <Maximize2 size={16} />
+              <span>Expand</span>
+            </button>
+          </div>
+        )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200" data-testid="data-table">
@@ -304,6 +316,17 @@ export default function TablePanel({
           </div>
         </div>
       )}
-    </div>
+      </div>
+
+      <DrillDownModal
+        isOpen={showDrillDown}
+        onClose={() => setShowDrillDown(false)}
+        panelId={panelId}
+        panelType="table"
+        tenantId={tenantId}
+        dateRange={dateRange ?? { from: null, to: null }}
+        title={title || 'Table'}
+      />
+    </>
   )
 }

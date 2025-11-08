@@ -19,6 +19,11 @@ vi.mock('react-plotly.js', () => ({
   ),
 }))
 
+// Mock the DrillDownModal component
+vi.mock('../../components/common/DrillDownModal', () => ({
+  default: () => null,
+}))
+
 describe('TimeSeriesPanel', () => {
   const mockDateRange = {
     from: new Date('2024-01-01T00:00:00Z'),

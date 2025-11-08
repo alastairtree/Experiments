@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import Plot from 'react-plotly.js'
+import { Maximize2 } from 'lucide-react'
 import { apiClient, PanelData } from '../../api/client'
 import type { DateRange } from '../DateFilter'
+import DrillDownModal from '../common/DrillDownModal'
 
 interface TimeSeriesPanelProps {
   panelId: string
@@ -37,6 +39,7 @@ export default function TimeSeriesPanel({
   const [data, setData] = useState<PanelData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showDrillDown, setShowDrillDown] = useState(false)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -126,9 +129,20 @@ export default function TimeSeriesPanel({
   }))
 
   return (
-    <div className="w-full">
-      {title && <h3 className="text-lg font-medium text-gray-900 mb-4">{title}</h3>}
-      <Plot
+    <>
+      <div className="w-full">
+        <div className="flex items-center justify-between mb-4">
+          {title && <h3 className="text-lg font-medium text-gray-900">{title}</h3>}
+          <button
+            onClick={() => setShowDrillDown(true)}
+            className="flex items-center gap-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+            aria-label="Expand panel"
+          >
+            <Maximize2 size={16} />
+            <span>Expand</span>
+          </button>
+        </div>
+        <Plot
         data={plotData}
         layout={{
           autosize: true,
@@ -176,6 +190,17 @@ export default function TimeSeriesPanel({
         }
         return null
       })()}
-    </div>
+      </div>
+
+      <DrillDownModal
+        isOpen={showDrillDown}
+        onClose={() => setShowDrillDown(false)}
+        panelId={panelId}
+        panelType="timeseries"
+        tenantId={tenantId}
+        dateRange={dateRange}
+        title={title || 'Time Series'}
+      />
+    </>
   )
 }
