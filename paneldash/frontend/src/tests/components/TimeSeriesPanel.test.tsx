@@ -55,7 +55,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: null,
-    } as ReturnType<typeof usePanelData>)
+    } as unknown as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -75,7 +75,7 @@ describe('TimeSeriesPanel', () => {
       error: new Error('Network error'),
       refetch: vi.fn(),
       lastUpdated: null,
-    } as ReturnType<typeof usePanelData>)
+    } as unknown as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -99,7 +99,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as ReturnType<typeof usePanelData>)
+    } as unknown as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -132,7 +132,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as ReturnType<typeof usePanelData>)
+    } as unknown as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -177,7 +177,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as ReturnType<typeof usePanelData>)
+    } as unknown as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -214,7 +214,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as ReturnType<typeof usePanelData>)
+    } as unknown as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -251,7 +251,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as ReturnType<typeof usePanelData>)
+    } as unknown as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -304,7 +304,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as ReturnType<typeof usePanelData>)
+    } as unknown as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel

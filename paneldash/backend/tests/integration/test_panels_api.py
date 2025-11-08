@@ -127,14 +127,14 @@ async def test_get_timeseries_panel_data(
     mock_loader = MagicMock()
     mock_loader.load_panel_config.return_value = time_series_config
 
-    def override_get_config_loader():
+    def override_get_config_loader() -> MagicMock:
         return mock_loader
 
     # Mock query builder
     mock_qb = MagicMock()
     mock_qb.build_time_series_query.return_value = ("SELECT *", {})
 
-    def override_get_query_builder():
+    def override_get_query_builder() -> MagicMock:
         return mock_qb
 
     # Mock data aggregator
@@ -142,7 +142,7 @@ async def test_get_timeseries_panel_data(
     mock_agg.should_aggregate.return_value = True
     mock_agg.get_bucket_interval.return_value = "10 minutes"
 
-    def override_get_data_aggregator():
+    def override_get_data_aggregator() -> MagicMock:
         return mock_agg
 
     app.dependency_overrides[get_current_active_user] = override_get_current_user
@@ -205,14 +205,14 @@ async def test_get_kpi_panel_data(
     mock_loader = MagicMock()
     mock_loader.load_panel_config.return_value = kpi_config
 
-    def override_get_config_loader():
+    def override_get_config_loader() -> MagicMock:
         return mock_loader
 
     # Mock query builder
     mock_qb = MagicMock()
     mock_qb.build_kpi_query.return_value = ("SELECT AVG(value)", {})
 
-    def override_get_query_builder():
+    def override_get_query_builder() -> MagicMock:
         return mock_qb
 
     app.dependency_overrides[get_current_active_user] = override_get_current_user
@@ -277,14 +277,14 @@ async def test_get_health_status_panel_data(
     mock_loader = MagicMock()
     mock_loader.load_panel_config.return_value = health_config
 
-    def override_get_config_loader():
+    def override_get_config_loader() -> MagicMock:
         return mock_loader
 
     # Mock query builder
     mock_qb = MagicMock()
     mock_qb.build_health_status_query.return_value = ("SELECT *", {})
 
-    def override_get_query_builder():
+    def override_get_query_builder() -> MagicMock:
         return mock_qb
 
     app.dependency_overrides[get_current_active_user] = override_get_current_user
@@ -342,14 +342,14 @@ async def test_get_table_panel_data(
     mock_loader = MagicMock()
     mock_loader.load_panel_config.return_value = table_config
 
-    def override_get_config_loader():
+    def override_get_config_loader() -> MagicMock:
         return mock_loader
 
     # Mock query builder
     mock_qb = MagicMock()
     mock_qb.build_table_query.return_value = ("SELECT *", {})
 
-    def override_get_query_builder():
+    def override_get_query_builder() -> MagicMock:
         return mock_qb
 
     app.dependency_overrides[get_current_active_user] = override_get_current_user

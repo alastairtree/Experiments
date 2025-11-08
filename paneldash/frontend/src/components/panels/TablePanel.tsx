@@ -324,7 +324,7 @@ export default function TablePanel({
         panelId={panelId}
         panelType="table"
         tenantId={tenantId}
-        dateRange={dateRange ?? { from: null, to: null }}
+        dateRange={dateRange ?? { from: null, to: null, preset: 'custom' }}
         title={title || 'Table'}
       />
     </>

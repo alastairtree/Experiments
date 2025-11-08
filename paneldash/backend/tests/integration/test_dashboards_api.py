@@ -90,7 +90,7 @@ async def test_list_dashboards_success(
     mock_loader = MagicMock()
     mock_loader.list_dashboards.return_value = ["default", "monitoring", "analytics"]
 
-    def override_get_config_loader():
+    def override_get_config_loader() -> MagicMock:
         return mock_loader
 
     app.dependency_overrides[get_current_active_user] = override_get_current_user
@@ -180,7 +180,7 @@ async def test_list_dashboards_admin_access(
     mock_loader = MagicMock()
     mock_loader.list_dashboards.return_value = ["default"]
 
-    def override_get_config_loader():
+    def override_get_config_loader() -> MagicMock:
         return mock_loader
 
     app.dependency_overrides[get_current_active_user] = override_get_current_user
@@ -243,7 +243,7 @@ async def test_get_dashboard_success(
     mock_loader = MagicMock()
     mock_loader.load_dashboard_config.return_value = dashboard_config
 
-    def override_get_config_loader():
+    def override_get_config_loader() -> MagicMock:
         return mock_loader
 
     app.dependency_overrides[get_current_active_user] = override_get_current_user
@@ -290,7 +290,7 @@ async def test_get_dashboard_not_found(
         "Dashboard not found"
     )
 
-    def override_get_config_loader():
+    def override_get_config_loader() -> MagicMock:
         return mock_loader
 
     app.dependency_overrides[get_current_active_user] = override_get_current_user
@@ -341,7 +341,7 @@ async def test_get_dashboard_no_layout(
     mock_loader = MagicMock()
     mock_loader.load_dashboard_config.return_value = dashboard_config
 
-    def override_get_config_loader():
+    def override_get_config_loader() -> MagicMock:
         return mock_loader
 
     app.dependency_overrides[get_current_active_user] = override_get_current_user
