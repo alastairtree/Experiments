@@ -18,10 +18,10 @@ class TestDatabaseMigrations:
     """Tests for database migrations."""
 
     @pytest.mark.asyncio
-    async def test_database_connection(self, db_available: bool) -> None:
+    async def test_database_connection(self, test_db_setup: bool) -> None:
         """Test that we can connect to the database."""
-        if not db_available:
-            pytest.skip("Database is not available")
+        if not test_db_setup:
+            pytest.skip("Database is not available or migrations failed")
 
         engine = create_async_engine(settings.central_database_url, echo=False)
 
@@ -35,14 +35,13 @@ class TestDatabaseMigrations:
             await engine.dispose()
 
     @pytest.mark.asyncio
-    async def test_database_schema_exists(self, db_available: bool) -> None:
+    async def test_database_schema_exists(self, test_db_setup: bool) -> None:
         """Test that the expected tables exist in the database.
 
-        Note: This test assumes migrations have been run manually.
-        In a full CI environment, you would run migrations before tests.
+        This test runs migrations automatically via test_db_setup fixture.
         """
-        if not db_available:
-            pytest.skip("Database is not available")
+        if not test_db_setup:
+            pytest.skip("Database is not available or migrations failed")
 
         engine = create_async_engine(settings.central_database_url, echo=False)
 
@@ -59,36 +58,30 @@ class TestDatabaseMigrations:
                 # These tables should exist after migration 001
                 expected_tables = ["users", "tenants", "user_tenants"]
 
-                # Check if we have any tables (might not if migrations haven't run)
-                if len(tables) > 0:
-                    # If we have tables, verify the expected ones exist
-                    for table in expected_tables:
-                        assert table in tables, f"Table '{table}' not found in database"
+                # Verify the expected tables exist
+                for table in expected_tables:
+                    assert table in tables, f"Table '{table}' not found in database"
 
-                    # Verify users table structure
-                    def check_users_columns(sync_conn):  # type: ignore[no-untyped-def]
-                        inspector = inspect(sync_conn)
-                        columns = inspector.get_columns("users")
-                        column_names = [col["name"] for col in columns]
-                        return column_names
+                # Verify users table structure
+                def check_users_columns(sync_conn):  # type: ignore[no-untyped-def]
+                    inspector = inspect(sync_conn)
+                    columns = inspector.get_columns("users")
+                    column_names = [col["name"] for col in columns]
+                    return column_names
 
-                    users_columns = await conn.run_sync(check_users_columns)
-                    expected_columns = ["id", "keycloak_id", "email", "full_name",
-                                       "is_admin", "created_at", "updated_at"]
-                    for col in expected_columns:
-                        assert col in users_columns, f"Column '{col}' not found in users table"
-                else:
-                    # If no tables exist, that's okay - migrations need to be run manually
-                    # We'll just skip the detailed checks
-                    pytest.skip("Database has no tables - migrations need to be run manually")
+                users_columns = await conn.run_sync(check_users_columns)
+                expected_columns = ["id", "keycloak_id", "email", "full_name",
+                                   "is_admin", "created_at", "updated_at"]
+                for col in expected_columns:
+                    assert col in users_columns, f"Column '{col}' not found in users table"
         finally:
             await engine.dispose()
 
     @pytest.mark.asyncio
-    async def test_database_constraints(self, db_available: bool) -> None:
+    async def test_database_constraints(self, test_db_setup: bool) -> None:
         """Test that database constraints are properly set up."""
-        if not db_available:
-            pytest.skip("Database is not available")
+        if not test_db_setup:
+            pytest.skip("Database is not available or migrations failed")
 
         engine = create_async_engine(settings.central_database_url, echo=False)
 
@@ -96,11 +89,6 @@ class TestDatabaseMigrations:
             async with engine.begin() as conn:
                 def check_constraints(sync_conn):  # type: ignore[no-untyped-def]
                     inspector = inspect(sync_conn)
-
-                    # Check if tables exist first
-                    tables = inspector.get_table_names()
-                    if "users" not in tables:
-                        return None
 
                     # Check primary keys
                     pk_users = inspector.get_pk_constraint("users")
@@ -118,10 +106,6 @@ class TestDatabaseMigrations:
                     }
 
                 constraints = await conn.run_sync(check_constraints)
-
-                if constraints is None:
-                    pytest.skip("Database has no tables - migrations need to be run manually")
-                    return
 
                 # Verify primary keys
                 assert "id" in constraints["pk_users"]["constrained_columns"]
@@ -142,10 +126,10 @@ class TestDatabaseMigrations:
             await engine.dispose()
 
     @pytest.mark.asyncio
-    async def test_database_indexes(self, db_available: bool) -> None:
+    async def test_database_indexes(self, test_db_setup: bool) -> None:
         """Test that database indexes are properly created."""
-        if not db_available:
-            pytest.skip("Database is not available")
+        if not test_db_setup:
+            pytest.skip("Database is not available or migrations failed")
 
         engine = create_async_engine(settings.central_database_url, echo=False)
 
@@ -153,11 +137,6 @@ class TestDatabaseMigrations:
             async with engine.begin() as conn:
                 def check_indexes(sync_conn):  # type: ignore[no-untyped-def]
                     inspector = inspect(sync_conn)
-
-                    # Check if tables exist first
-                    tables = inspector.get_table_names()
-                    if "users" not in tables:
-                        return None
 
                     users_indexes = inspector.get_indexes("users")
                     tenants_indexes = inspector.get_indexes("tenants")
@@ -170,10 +149,6 @@ class TestDatabaseMigrations:
                     }
 
                 indexes = await conn.run_sync(check_indexes)
-
-                if indexes is None:
-                    pytest.skip("Database has no tables - migrations need to be run manually")
-                    return
 
                 # We should have indexes on email, tenant_id, and foreign keys
                 # Note: Exact index names may vary, so we check for indexed columns
