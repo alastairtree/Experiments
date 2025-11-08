@@ -97,8 +97,8 @@ export default function DrillDownModal({
           csvContent += row.join(',') + '\n'
         })
       })
-    } else if (panelType === 'table' && Array.isArray((data.data as any).rows)) {
-      const tableData = data.data as { rows: TableRow[]; columns: any[] }
+    } else if (panelType === 'table' && typeof data.data === 'object' && data.data !== null && 'rows' in data.data) {
+      const tableData = data.data as { rows: TableRow[]; columns: Array<{ name: string }> }
       // CSV header
       const headers = tableData.columns.map((col) => col.name)
       csvContent = headers.join(',') + '\n'

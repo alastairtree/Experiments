@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import TimeSeriesPanel from '../../components/panels/TimeSeriesPanel'
 import { usePanelData } from '../../api/queries'
 
@@ -55,27 +55,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: null,
-      dataUpdatedAt: 0,
-      errorUpdatedAt: 0,
-      failureCount: 0,
-      failureReason: null,
-      errorUpdateCount: 0,
-      isError: false,
-      isFetched: false,
-      isFetchedAfterMount: false,
-      isFetching: false,
-      isInitialLoading: true,
-      isLoadingError: false,
-      isPaused: false,
-      isPending: false,
-      isPlaceholderData: false,
-      isRefetchError: false,
-      isRefetching: false,
-      isStale: false,
-      isSuccess: false,
-      status: 'pending',
-      fetchStatus: 'fetching',
-    } as any)
+    } as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -95,7 +75,7 @@ describe('TimeSeriesPanel', () => {
       error: new Error('Network error'),
       refetch: vi.fn(),
       lastUpdated: null,
-    } as any)
+    } as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -119,7 +99,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as any)
+    } as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -152,7 +132,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as any)
+    } as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -197,7 +177,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as any)
+    } as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -234,7 +214,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as any)
+    } as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -271,7 +251,7 @@ describe('TimeSeriesPanel', () => {
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as any)
+    } as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
@@ -317,14 +297,14 @@ describe('TimeSeriesPanel', () => {
     vi.mocked(usePanelData).mockReturnValue({
       data: {
         panel_id: 'cpu_usage',
-        panel_type: 'kpi' as any,
+        panel_type: 'kpi' as const,
         data: { value: 75.3 },
       },
       isLoading: false,
       error: null,
       refetch: vi.fn(),
       lastUpdated: new Date(),
-    } as any)
+    } as ReturnType<typeof usePanelData>)
 
     render(
       <TimeSeriesPanel
