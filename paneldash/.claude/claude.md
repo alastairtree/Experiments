@@ -119,6 +119,10 @@ docker-compose down                     # Stop services
    - Format: ruff handles backend, prettier/eslint for frontend
 
 3. **Testing:**
+   - **CRITICAL: All new features MUST include tests**
+   - New API endpoints require integration tests
+   - New components require unit tests
+   - Critical user flows require E2E tests
    - Unit tests: >70% coverage target
    - Integration tests: All API endpoints
    - E2E tests: Critical user flows
@@ -162,17 +166,17 @@ cd .. && npm run test:e2e
 - ✅ Step 1: Project initialization (uv, npm, configs)
 - ✅ Step 2: Docker infrastructure (compose, Dockerfiles)
 - ✅ Step 3: Backend project structure (SQLAlchemy, Alembic)
+- ✅ Step 4: Central database models (users, tenants, mappings) + migrations + tests
+- ✅ Step 5: Keycloak integration (JWT validation, auth dependencies)
+- ✅ Step 6: User & tenant management API (with comprehensive tests)
 
-**Next Steps (Steps 4-10):**
-- Step 4: Central database models (users, tenants, mappings)
-- Step 5: Keycloak integration
-- Step 6: User & tenant management API
-- Step 7: Frontend project setup
-- Step 8: Authentication UI
-- Step 9: Tenant selection UI
-- Step 10: Admin user management UI
+**Next Steps (Steps 7-10):**
+- Step 7: Frontend project setup (Vite + React + TypeScript)
+- Step 8: Authentication UI (login, logout, protected routes)
+- Step 9: Tenant selection UI (dropdown, context)
+- Step 10: Admin user management UI (user CRUD)
 
-**Total Progress:** 47 steps planned, 3 completed (6%)
+**Total Progress:** 47 steps planned, 6 completed (13%)
 
 ### Implementation Reference
 
@@ -199,8 +203,13 @@ See `dashboard-specification.md` for:
 1. Define Pydantic schemas in `backend/app/schemas/`
 2. Create endpoint in `backend/app/api/v1/`
 3. Register router in `backend/app/main.py`
-4. Add integration test in `backend/tests/integration/`
+4. **REQUIRED:** Add integration test in `backend/tests/integration/`
+   - Test successful responses
+   - Test authentication/authorization
+   - Test error cases (404, 403, 400, etc.)
+   - Mock external dependencies (Keycloak, etc.)
 5. Update OpenAPI docs
+6. Verify all tests pass: `uv run pytest`
 
 ### Adding a React Component
 

@@ -116,6 +116,27 @@ async def test_db(postgres_server, run_migrations: None, test_db_url: str) -> As
         await engine.dispose()
 
 
+@pytest.fixture
+async def db_session(test_db: None, test_db_url: str) -> AsyncGenerator[AsyncSession, None]:  # noqa: ARG001
+    """Provide a database session for tests."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    engine = create_async_engine(test_db_url, echo=False)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    await engine.dispose()
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
     config.addinivalue_line(
