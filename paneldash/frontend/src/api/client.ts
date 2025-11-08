@@ -20,6 +20,26 @@ export interface Tenant {
   is_active: boolean
 }
 
+export interface DashboardPanelReference {
+  id: string
+  config_file: string
+}
+
+export interface Dashboard {
+  name: string
+  description: string | null
+  refresh_interval: number
+  layout: { columns: number } | null
+  panels: DashboardPanelReference[]
+}
+
+export interface PanelData {
+  panel_id: string
+  panel_type: 'timeseries' | 'kpi' | 'health_status' | 'table'
+  data: Record<string, unknown>
+  aggregation_info?: Record<string, unknown> | null
+}
+
 export class ApiClient {
   private baseUrl: string
   private token: string | null = null
@@ -176,6 +196,69 @@ export class ApiClient {
     if (!response.ok) {
       throw new Error(`Failed to remove user from tenant: ${response.statusText}`)
     }
+  }
+
+  // Dashboard endpoints
+  async getDashboards(tenantId: string): Promise<{ dashboards: string[] }> {
+    const response = await fetch(
+      `${this.baseUrl}/api/v1/dashboards?tenant_id=${encodeURIComponent(tenantId)}`,
+      {
+        headers: this.getHeaders(),
+      }
+    )
+    if (!response.ok) {
+      throw new Error(`Failed to get dashboards: ${response.statusText}`)
+    }
+    return response.json()
+  }
+
+  async getDashboard(tenantId: string, dashboardName: string = 'default'): Promise<Dashboard> {
+    const response = await fetch(
+      `${this.baseUrl}/api/v1/dashboards/${encodeURIComponent(dashboardName)}?tenant_id=${encodeURIComponent(tenantId)}`,
+      {
+        headers: this.getHeaders(),
+      }
+    )
+    if (!response.ok) {
+      throw new Error(`Failed to get dashboard: ${response.statusText}`)
+    }
+    return response.json()
+  }
+
+  // Panel data endpoints
+  async getPanelData(
+    tenantId: string,
+    panelId: string,
+    params?: {
+      date_from?: string
+      date_to?: string
+      disable_aggregation?: boolean
+      sort_column?: string
+      sort_order?: 'asc' | 'desc'
+      page?: number
+    }
+  ): Promise<PanelData> {
+    const queryParams = new URLSearchParams({ tenant_id: tenantId })
+    if (params) {
+      if (params.date_from) queryParams.append('date_from', params.date_from)
+      if (params.date_to) queryParams.append('date_to', params.date_to)
+      if (params.disable_aggregation !== undefined)
+        queryParams.append('disable_aggregation', String(params.disable_aggregation))
+      if (params.sort_column) queryParams.append('sort_column', params.sort_column)
+      if (params.sort_order) queryParams.append('sort_order', params.sort_order)
+      if (params.page) queryParams.append('page', String(params.page))
+    }
+
+    const response = await fetch(
+      `${this.baseUrl}/api/v1/panels/${encodeURIComponent(panelId)}/data?${queryParams}`,
+      {
+        headers: this.getHeaders(),
+      }
+    )
+    if (!response.ok) {
+      throw new Error(`Failed to get panel data: ${response.statusText}`)
+    }
+    return response.json()
   }
 }
 
