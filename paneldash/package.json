@@ -8,7 +8,7 @@
     "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {
-    "@playwright/test": "^1.48.0",
+    "@playwright/test": "^1.56.1",
     "dotenv": "^17.2.3"
   }
 }
