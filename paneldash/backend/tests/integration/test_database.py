@@ -1,14 +1,8 @@
-"""Integration tests for database migrations and schema.
-
-Note: These tests require a running PostgreSQL database.
-They will be skipped if the database is not available.
-"""
+"""Integration tests for database migrations and schema."""
 
 import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.config import settings
 
 # Marker for tests that require a database
 pytestmark = pytest.mark.integration
@@ -18,12 +12,9 @@ class TestDatabaseMigrations:
     """Tests for database migrations."""
 
     @pytest.mark.asyncio
-    async def test_database_connection(self, test_db_setup: bool) -> None:
+    async def test_database_connection(self, test_db: None, test_db_url: str) -> None:  # noqa: ARG002
         """Test that we can connect to the database."""
-        if not test_db_setup:
-            pytest.skip("Database is not available or migrations failed")
-
-        engine = create_async_engine(settings.central_database_url, echo=False)
+        engine = create_async_engine(test_db_url, echo=False)
 
         try:
             async with engine.begin() as conn:
@@ -35,15 +26,9 @@ class TestDatabaseMigrations:
             await engine.dispose()
 
     @pytest.mark.asyncio
-    async def test_database_schema_exists(self, test_db_setup: bool) -> None:
-        """Test that the expected tables exist in the database.
-
-        This test runs migrations automatically via test_db_setup fixture.
-        """
-        if not test_db_setup:
-            pytest.skip("Database is not available or migrations failed")
-
-        engine = create_async_engine(settings.central_database_url, echo=False)
+    async def test_database_schema_exists(self, test_db: None, test_db_url: str) -> None:  # noqa: ARG002
+        """Test that the expected tables exist in the database."""
+        engine = create_async_engine(test_db_url, echo=False)
 
         try:
             async with engine.begin() as conn:
@@ -70,23 +55,30 @@ class TestDatabaseMigrations:
                     return column_names
 
                 users_columns = await conn.run_sync(check_users_columns)
-                expected_columns = ["id", "keycloak_id", "email", "full_name",
-                                   "is_admin", "created_at", "updated_at"]
+                expected_columns = [
+                    "id",
+                    "keycloak_id",
+                    "email",
+                    "full_name",
+                    "is_admin",
+                    "created_at",
+                    "updated_at",
+                ]
                 for col in expected_columns:
-                    assert col in users_columns, f"Column '{col}' not found in users table"
+                    assert (
+                        col in users_columns
+                    ), f"Column '{col}' not found in users table"
         finally:
             await engine.dispose()
 
     @pytest.mark.asyncio
-    async def test_database_constraints(self, test_db_setup: bool) -> None:
+    async def test_database_constraints(self, test_db: None, test_db_url: str) -> None:  # noqa: ARG002
         """Test that database constraints are properly set up."""
-        if not test_db_setup:
-            pytest.skip("Database is not available or migrations failed")
-
-        engine = create_async_engine(settings.central_database_url, echo=False)
+        engine = create_async_engine(test_db_url, echo=False)
 
         try:
             async with engine.begin() as conn:
+
                 def check_constraints(sync_conn):  # type: ignore[no-untyped-def]
                     inspector = inspect(sync_conn)
 
@@ -112,29 +104,30 @@ class TestDatabaseMigrations:
                 assert "id" in constraints["pk_tenants"]["constrained_columns"]
                 assert set(constraints["pk_user_tenants"]["constrained_columns"]) == {
                     "user_id",
-                    "tenant_id"
+                    "tenant_id",
                 }
 
                 # Verify foreign keys exist
-                assert len(constraints["fk_user_tenants"]) == 2, \
-                    "user_tenants should have 2 foreign keys"
+                assert (
+                    len(constraints["fk_user_tenants"]) == 2
+                ), "user_tenants should have 2 foreign keys"
 
                 # Check that foreign keys reference correct tables
-                fk_tables = {fk["referred_table"] for fk in constraints["fk_user_tenants"]}
+                fk_tables = {
+                    fk["referred_table"] for fk in constraints["fk_user_tenants"]
+                }
                 assert fk_tables == {"users", "tenants"}
         finally:
             await engine.dispose()
 
     @pytest.mark.asyncio
-    async def test_database_indexes(self, test_db_setup: bool) -> None:
+    async def test_database_indexes(self, test_db: None, test_db_url: str) -> None:  # noqa: ARG002
         """Test that database indexes are properly created."""
-        if not test_db_setup:
-            pytest.skip("Database is not available or migrations failed")
-
-        engine = create_async_engine(settings.central_database_url, echo=False)
+        engine = create_async_engine(test_db_url, echo=False)
 
         try:
             async with engine.begin() as conn:
+
                 def check_indexes(sync_conn):  # type: ignore[no-untyped-def]
                     inspector = inspect(sync_conn)
 
@@ -157,7 +150,8 @@ class TestDatabaseMigrations:
                 }
 
                 # Check that we have an index on email
-                assert any("email" in cols for cols in users_index_cols), \
-                    "Should have index on users.email"
+                assert any(
+                    "email" in cols for cols in users_index_cols
+                ), "Should have index on users.email"
         finally:
             await engine.dispose()

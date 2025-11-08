@@ -1,15 +1,17 @@
 """Pytest configuration and shared fixtures."""
 
+import os
 import subprocess
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
+from tempfile import mkdtemp
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pgserver import get_server
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.config import settings
 from app.main import app
 
 
@@ -22,28 +24,64 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture(scope="session")
-async def db_available() -> bool:
-    """Check if the database is available for integration tests."""
-    engine = create_async_engine(settings.central_database_url, echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(text("SELECT 1"))
-        return True
-    except (ConnectionRefusedError, OSError, Exception):
-        return False
-    finally:
-        await engine.dispose()
+def postgres_server() -> Generator:  # type: ignore[type-arg]
+    """Create a temporary PostgreSQL server for tests."""
+    # Create a temporary directory for the PostgreSQL data
+    pgdata = Path(mkdtemp())
+
+    # Get a PostgreSQL server instance (will be cleaned up automatically)
+    server = get_server(pgdata, cleanup_mode="delete")
+
+    # Start the server
+    with server:
+        server.ensure_pgdata_inited()
+        server.ensure_postgres_running()
+        yield server
 
 
 @pytest.fixture(scope="session")
-async def test_db_setup(db_available: bool) -> AsyncGenerator[bool, None]:
-    """Set up test database with migrations if PostgreSQL is available."""
-    if not db_available:
-        yield False
-        return
+def test_db_url(postgres_server) -> str:  # type: ignore[no-untyped-def]
+    """Get the test database URL."""
+    # Get the connection URI from the server
+    uri = postgres_server.get_uri()
 
-    # Database is available - run migrations
+    # Convert to asyncpg format (replace postgresql:// with postgresql+asyncpg://)
+    return uri.replace("postgresql://", "postgresql+asyncpg://")
+
+
+@pytest.fixture(scope="session")
+def run_migrations(postgres_server, test_db_url: str) -> None:  # type: ignore[no-untyped-def]  # noqa: ARG001
+    """Run database migrations on the test database."""
     backend_dir = Path(__file__).parent.parent
+
+    # Get connection info from the URI
+    info = postgres_server.get_postmaster_info()
+
+    # Temporarily override database URL for migrations
+    original_vars = {}
+
+    # pgserver uses Unix domain sockets by default, use socket_dir if available
+    if info.socket_dir:
+        env_vars = {
+            "CENTRAL_DB_HOST": str(info.socket_dir),
+            "CENTRAL_DB_PORT": str(info.port) if info.port else "5432",
+            "CENTRAL_DB_NAME": "postgres",
+            "CENTRAL_DB_USER": "postgres",
+            "CENTRAL_DB_PASSWORD": "",
+        }
+    else:
+        env_vars = {
+            "CENTRAL_DB_HOST": info.hostname or "localhost",
+            "CENTRAL_DB_PORT": str(info.port) if info.port else "5432",
+            "CENTRAL_DB_NAME": "postgres",
+            "CENTRAL_DB_USER": "postgres",
+            "CENTRAL_DB_PASSWORD": "",
+        }
+
+    for key, value in env_vars.items():
+        original_vars[key] = os.environ.get(key)
+        os.environ[key] = value
+
     try:
         # Run migrations
         result = subprocess.run(
@@ -54,15 +92,28 @@ async def test_db_setup(db_available: bool) -> AsyncGenerator[bool, None]:
             timeout=30,
         )
 
-        if result.returncode == 0:
-            yield True
-        else:
-            # Migrations failed, skip tests
-            print(f"Migration failed: {result.stderr}")
-            yield False
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
-        print(f"Could not run migrations: {e}")
-        yield False
+        if result.returncode != 0:
+            raise RuntimeError(f"Migration failed: {result.stderr}")
+    finally:
+        # Restore original environment
+        for key, original_value in original_vars.items():
+            if original_value is not None:
+                os.environ[key] = original_value
+            else:
+                os.environ.pop(key, None)
+
+
+@pytest.fixture
+async def test_db(postgres_server, run_migrations: None, test_db_url: str) -> AsyncGenerator[None, None]:  # type: ignore[no-untyped-def]  # noqa: ARG001
+    """Provide a test database with migrations applied."""
+    # Verify database is accessible
+    engine = create_async_engine(test_db_url, echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        yield
+    finally:
+        await engine.dispose()
 
 
 def pytest_configure(config: pytest.Config) -> None:

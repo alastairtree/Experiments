@@ -28,10 +28,20 @@ class Settings(BaseSettings):
     @property
     def central_database_url(self) -> str:
         """Get the central database URL."""
-        return (
-            f"postgresql+asyncpg://{self.central_db_user}:{self.central_db_password}"
-            f"@{self.central_db_host}:{self.central_db_port}/{self.central_db_name}"
-        )
+        # Check if host is a Unix socket path (starts with /)
+        if self.central_db_host.startswith("/"):
+            # Unix domain socket connection
+            password_part = f":{self.central_db_password}" if self.central_db_password else ""
+            return (
+                f"postgresql+asyncpg://{self.central_db_user}{password_part}@"
+                f"/{self.central_db_name}?host={self.central_db_host}"
+            )
+        else:
+            # TCP/IP connection
+            return (
+                f"postgresql+asyncpg://{self.central_db_user}:{self.central_db_password}"
+                f"@{self.central_db_host}:{self.central_db_port}/{self.central_db_name}"
+            )
 
 
 settings = Settings()
