@@ -205,4 +205,8 @@ def get_config_loader() -> ConfigLoader:
     Returns:
         ConfigLoader instance
     """
-    return ConfigLoader()
+    # Path to tenants config directory (relative to project root)
+    # __file__ is at: backend/app/services/config_loader.py
+    # So we need to go up 4 levels to get to project root, then down to tenants/
+    tenants_path = Path(__file__).parent.parent.parent.parent / "tenants"
+    return ConfigLoader(tenants_path)
