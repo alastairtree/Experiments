@@ -80,10 +80,12 @@ class TestUserEndpoints:
         mock_admin_token: dict[str, object],
     ) -> None:
         """Test listing all users as admin."""
-        # Create admin user
+        # Create admin user with unique ID from mock token
+        admin_keycloak_id = str(mock_admin_token["sub"])
+        admin_email = str(mock_admin_token["email"])
         admin = User(
-            keycloak_id="admin-456",
-            email="admin@example.com",
+            keycloak_id=admin_keycloak_id,
+            email=admin_email,
             full_name="Admin User",
             is_admin=True,
         )
@@ -103,9 +105,10 @@ class TestUserEndpoints:
             # Should see at least the test users and admin
             assert len(data) >= 3
             emails = [u["email"] for u in data]
-            assert "user1@example.com" in emails
-            assert "user2@example.com" in emails
-            assert "admin@example.com" in emails
+            # Check for unique email patterns from fixtures
+            assert any(e.startswith("user-1-") for e in emails)
+            assert any(e.startswith("user-2-") for e in emails)
+            assert any(e.startswith("admin-") for e in emails)
 
     @pytest.mark.asyncio
     async def test_list_users_as_regular_user_forbidden(
@@ -115,10 +118,12 @@ class TestUserEndpoints:
         mock_user_token: dict[str, object],
     ) -> None:
         """Test listing users as regular user returns 403."""
-        # Create regular user
+        # Create regular user with unique ID from mock token
+        user_keycloak_id = str(mock_user_token["sub"])
+        user_email = str(mock_user_token["email"])
         user = User(
-            keycloak_id="user-123",
-            email="user@example.com",
+            keycloak_id=user_keycloak_id,
+            email=user_email,
             full_name="Regular User",
             is_admin=False,
         )
@@ -146,10 +151,12 @@ class TestUserEndpoints:
         """Test getting user by ID as admin."""
         user_id = test_users[0]
 
-        # Create admin user
+        # Create admin user with unique ID from mock token
+        admin_keycloak_id = str(mock_admin_token["sub"])
+        admin_email = str(mock_admin_token["email"])
         admin = User(
-            keycloak_id="admin-456",
-            email="admin@example.com",
+            keycloak_id=admin_keycloak_id,
+            email=admin_email,
             full_name="Admin User",
             is_admin=True,
         )
@@ -168,7 +175,8 @@ class TestUserEndpoints:
             data = response.json()
 
             assert data["id"] == str(user_id)
-            assert data["email"] == "user1@example.com"
+            # Check email pattern from test_users fixture
+            assert data["email"].startswith("user-1-")
             assert data["full_name"] == "User One"
 
     @pytest.mark.asyncio
@@ -179,10 +187,12 @@ class TestUserEndpoints:
         mock_admin_token: dict[str, object],
     ) -> None:
         """Test getting nonexistent user returns 404."""
-        # Create admin user
+        # Create admin user with unique ID from mock token
+        admin_keycloak_id = str(mock_admin_token["sub"])
+        admin_email = str(mock_admin_token["email"])
         admin = User(
-            keycloak_id="admin-456",
-            email="admin@example.com",
+            keycloak_id=admin_keycloak_id,
+            email=admin_email,
             full_name="Admin User",
             is_admin=True,
         )
@@ -213,10 +223,12 @@ class TestUserEndpoints:
         """Test updating user as admin."""
         user_id = test_users[0]
 
-        # Create admin user
+        # Create admin user with unique ID from mock token
+        admin_keycloak_id = str(mock_admin_token["sub"])
+        admin_email = str(mock_admin_token["email"])
         admin = User(
-            keycloak_id="admin-456",
-            email="admin@example.com",
+            keycloak_id=admin_keycloak_id,
+            email=admin_email,
             full_name="Admin User",
             is_admin=True,
         )
@@ -242,7 +254,8 @@ class TestUserEndpoints:
 
             assert data["full_name"] == "Updated User Name"
             assert data["is_admin"] is True
-            assert data["email"] == "user1@example.com"  # Unchanged
+            # Email should be unchanged - check pattern from test_users fixture
+            assert data["email"].startswith("user-1-")
 
     @pytest.mark.asyncio
     async def test_update_user_partial(
@@ -255,10 +268,12 @@ class TestUserEndpoints:
         """Test partial update of user."""
         user_id = test_users[1]
 
-        # Create admin user
+        # Create admin user with unique ID from mock token
+        admin_keycloak_id = str(mock_admin_token["sub"])
+        admin_email = str(mock_admin_token["email"])
         admin = User(
-            keycloak_id="admin-456",
-            email="admin@example.com",
+            keycloak_id=admin_keycloak_id,
+            email=admin_email,
             full_name="Admin User",
             is_admin=True,
         )
@@ -295,10 +310,12 @@ class TestUserEndpoints:
         """Test deleting user as admin."""
         user_id = test_users[0]
 
-        # Create admin user
+        # Create admin user with unique ID from mock token
+        admin_keycloak_id = str(mock_admin_token["sub"])
+        admin_email = str(mock_admin_token["email"])
         admin = User(
-            keycloak_id="admin-456",
-            email="admin@example.com",
+            keycloak_id=admin_keycloak_id,
+            email=admin_email,
             full_name="Admin User",
             is_admin=True,
         )
@@ -333,10 +350,12 @@ class TestUserEndpoints:
         """Test deleting user as regular user returns 403."""
         user_id = test_users[0]
 
-        # Create regular user
+        # Create regular user with unique ID from mock token
+        user_keycloak_id = str(mock_user_token["sub"])
+        user_email = str(mock_user_token["email"])
         user = User(
-            keycloak_id="user-123",
-            email="user@example.com",
+            keycloak_id=user_keycloak_id,
+            email=user_email,
             full_name="Regular User",
             is_admin=False,
         )
