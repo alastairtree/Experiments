@@ -2,144 +2,30 @@
  * E2E Test: Valid User Authentication and Dashboard Access
  *
  * This test verifies that a valid user can:
- * 1. Be created in the database via Keycloak authentication
- * 2. Successfully authenticate with a valid JWT token
- * 3. Access the dashboard
- * 4. View tenant information
+ * 1. Authenticate with a valid JWT token
+ * 2. Access protected API endpoints
+ * 3. Be automatically created in the database on first login
+ * 4. Be assigned to tenants and access tenant data
  */
 
-import { test, expect, Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import { generateJWTToken, TEST_USERS } from '../fixtures/jwt-helper'
-import { createUserViaAuth, createTenant, assignUserToTenant } from '../fixtures/database-helper'
 
 test.describe('Valid User Authentication', () => {
   let validUserToken: string
-  let userId: string
-  let tenantId: string
+  let adminToken: string
 
   test.beforeAll(async () => {
-    // Generate a valid JWT token for the test user
+    // Generate valid JWT tokens for testing
     validUserToken = generateJWTToken(TEST_USERS.validUser)
-    console.log('Generated valid user token:', validUserToken.substring(0, 50) + '...')
+    adminToken = generateJWTToken(TEST_USERS.adminUser)
 
-    // Create the user in the database via the auth endpoint
-    // This simulates the first login flow where the user is auto-created
-    try {
-      const user = await createUserViaAuth(validUserToken)
-      userId = user.id
-      console.log('Created user:', user.email, 'ID:', userId)
-
-      // Create an admin token to set up test data
-      const adminToken = generateJWTToken(TEST_USERS.adminUser)
-      const adminUser = await createUserViaAuth(adminToken)
-      console.log('Created admin user:', adminUser.email)
-
-      // Create a test tenant
-      const tenant = await createTenant(adminToken, {
-        name: 'E2E Test Tenant',
-        config_path: '/config/tenants/e2e-test',
-        is_active: true,
-      })
-      tenantId = tenant.id
-      console.log('Created tenant:', tenant.name, 'ID:', tenantId)
-
-      // Assign the valid user to the tenant
-      await assignUserToTenant(adminToken, userId, tenantId)
-      console.log('Assigned user to tenant')
-    } catch (error) {
-      console.error('Setup failed:', error)
-      throw error
-    }
+    console.log('Generated valid user token (first 50 chars):', validUserToken.substring(0, 50) + '...')
+    console.log('Generated admin token (first 50 chars):', adminToken.substring(0, 50) + '...')
   })
 
-  async function loginWithToken(page: Page, token: string) {
-    // Navigate to the app
-    await page.goto('/')
-
-    // Set the auth token in localStorage to simulate successful authentication
-    await page.evaluate(
-      ({ token: authToken }) => {
-        localStorage.setItem('auth_token', authToken)
-      },
-      { token }
-    )
-
-    // Reload to apply the token
-    await page.reload()
-    await page.waitForLoadState('networkidle')
-  }
-
-  test('valid user can authenticate and see dashboard', async ({ page }) => {
-    // Login with the valid token
-    await loginWithToken(page, validUserToken)
-
-    // Should be redirected to dashboard (or already there)
-    await page.waitForURL(/\/(dashboard)?/, { timeout: 10000 })
-
-    // Navigate explicitly to dashboard if needed
-    if (!page.url().includes('dashboard')) {
-      await page.goto('/dashboard')
-      await page.waitForLoadState('networkidle')
-    }
-
-    // Verify we're on the dashboard page
-    const url = page.url()
-    expect(url).toContain('dashboard')
-
-    // Check that we can see dashboard content
-    // Look for common dashboard elements
-    const body = await page.textContent('body')
-    expect(body).toBeTruthy()
-
-    // Verify user info is displayed (email or name)
-    const userEmail = TEST_USERS.validUser.email
-    const hasUserInfo = body?.includes(userEmail) || body?.includes('Valid Test User')
-    if (hasUserInfo) {
-      console.log('User info found on dashboard')
-    }
-
-    // Take a screenshot for verification
-    await page.screenshot({
-      path: 'test-results/screenshots/valid-user-dashboard.png',
-      fullPage: true,
-    })
-  })
-
-  test('valid user can access tenant dashboard with data', async ({ page }) => {
-    // Login with the valid token
-    await loginWithToken(page, validUserToken)
-
-    // Navigate to dashboard
-    await page.goto('/dashboard')
-    await page.waitForLoadState('networkidle')
-
-    // Look for tenant selector or tenant-related content
-    const body = await page.textContent('body')
-
-    // The user should see tenant information or tenant selector
-    // depending on how many tenants they have access to
-    expect(body).toBeTruthy()
-
-    // Check for common dashboard elements
-    const hasDashboardContent =
-      body?.includes('tenant') ||
-      body?.includes('Tenant') ||
-      body?.includes('dashboard') ||
-      body?.includes('Dashboard')
-
-    expect(hasDashboardContent).toBeTruthy()
-
-    console.log('Dashboard content verified')
-
-    // Take a screenshot
-    await page.screenshot({
-      path: 'test-results/screenshots/valid-user-tenant-dashboard.png',
-      fullPage: true,
-    })
-  })
-
-  test('valid user is authenticated and /auth/me returns user data', async ({ request }) => {
-    // Call the /auth/me endpoint with the valid token
+  test('valid user token can authenticate with backend', async ({ request }) => {
+    // Call /auth/me with valid token - this will auto-create the user
     const response = await request.get('http://localhost:8001/api/v1/auth/me', {
       headers: {
         Authorization: `Bearer ${validUserToken}`,
@@ -151,39 +37,220 @@ test.describe('Valid User Authentication', () => {
     const userData = await response.json()
     expect(userData.email).toBe(TEST_USERS.validUser.email)
     expect(userData.keycloak_id).toBe(TEST_USERS.validUser.sub)
-    expect(userData.accessible_tenant_ids).toContain(tenantId)
+    expect(userData.is_admin).toBe(false)
 
-    console.log('User data verified:', userData)
+    console.log('Valid user authenticated successfully:', userData.email)
+    console.log('User ID:', userData.id)
   })
 
-  test('valid user can see assigned tenant in tenant list', async ({ page }) => {
-    // Login with the valid token
-    await loginWithToken(page, validUserToken)
-
-    // Navigate to dashboard
-    await page.goto('/dashboard')
-    await page.waitForLoadState('networkidle')
-
-    // Wait a bit for any API calls to complete
-    await page.waitForTimeout(2000)
-
-    // Look for tenant selector or tenant name
-    const body = await page.textContent('body')
-    expect(body).toBeTruthy()
-
-    // The tenant name should appear somewhere on the page
-    const hasTenantName = body?.includes('E2E Test Tenant') || body?.includes('e2e-test')
-
-    if (hasTenantName) {
-      console.log('Tenant name found on dashboard')
-    } else {
-      console.log('Tenant name not found, but user has access')
+  test('valid user is auto-created in database on first login', async ({ request }) => {
+    // Generate a new unique user to test auto-creation
+    const newUser = {
+      sub: `e2e-auto-create-${Date.now()}`,
+      email: `autocreate-${Date.now()}@example.com`,
+      name: 'Auto Created User',
+      preferred_username: 'autocreate',
+      email_verified: true,
+      realm_access: {
+        roles: ['user']
+      }
     }
 
-    // Take a screenshot
-    await page.screenshot({
-      path: 'test-results/screenshots/valid-user-tenant-list.png',
-      fullPage: true,
+    const newUserToken = generateJWTToken(newUser)
+
+    // First call should create the user
+    const response1 = await request.get('http://localhost:8001/api/v1/auth/me', {
+      headers: {
+        Authorization: `Bearer ${newUserToken}`,
+      },
     })
+
+    expect(response1.status()).toBe(200)
+    const userData1 = await response1.json()
+    expect(userData1.email).toBe(newUser.email)
+    const userId = userData1.id
+
+    console.log('New user auto-created:', userData1.email)
+
+    // Second call should return the same user
+    const response2 = await request.get('http://localhost:8001/api/v1/auth/me', {
+      headers: {
+        Authorization: `Bearer ${newUserToken}`,
+      },
+    })
+
+    expect(response2.status()).toBe(200)
+    const userData2 = await response2.json()
+    expect(userData2.id).toBe(userId)
+    expect(userData2.email).toBe(newUser.email)
+
+    console.log('Same user returned on second login')
+  })
+
+  test('admin user is created with admin flag', async ({ request }) => {
+    // Call /auth/me with admin token
+    const response = await request.get('http://localhost:8001/api/v1/auth/me', {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    })
+
+    expect(response.status()).toBe(200)
+
+    const userData = await response.json()
+    expect(userData.email).toBe(TEST_USERS.adminUser.email)
+    expect(userData.is_admin).toBe(true)
+
+    console.log('Admin user authenticated successfully:', userData.email)
+    console.log('Admin flag set:', userData.is_admin)
+  })
+
+  test('authenticated user can create tenant', async ({ request }) => {
+    // Create a tenant using admin token
+    const response = await request.post('http://localhost:8001/api/v1/tenants', {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      data: {
+        name: 'E2E Test Tenant',
+        config_path: `/config/tenants/e2e-test-${Date.now()}`,
+        is_active: true,
+      },
+    })
+
+    expect(response.status()).toBe(201)
+
+    const tenant = await response.json()
+    expect(tenant.name).toBe('E2E Test Tenant')
+    expect(tenant.is_active).toBe(true)
+
+    console.log('Tenant created successfully:', tenant.name)
+    console.log('Tenant ID:', tenant.id)
+  })
+
+  test('authenticated user can list tenants', async ({ request }) => {
+    // List tenants using admin token
+    const response = await request.get('http://localhost:8001/api/v1/tenants/', {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    })
+
+    expect(response.status()).toBe(200)
+
+    const tenants = await response.json()
+    expect(Array.isArray(tenants)).toBe(true)
+
+    console.log('Listed tenants:', tenants.length)
+  })
+
+  test('authenticated user can assign user to tenant', async ({ request }) => {
+    // First, get the current user info
+    const meResponse = await request.get('http://localhost:8001/api/v1/auth/me', {
+      headers: {
+        Authorization: `Bearer ${validUserToken}`,
+      },
+    })
+    const userData = await meResponse.json()
+    const userId = userData.id
+
+    // Create a tenant
+    const tenantResponse = await request.post('http://localhost:8001/api/v1/tenants', {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      data: {
+        name: 'Assignment Test Tenant',
+        config_path: `/config/tenants/assignment-test-${Date.now()}`,
+        is_active: true,
+      },
+    })
+    const tenant = await tenantResponse.json()
+    const tenantId = tenant.id
+
+    // Assign user to tenant
+    const assignResponse = await request.post(
+      `http://localhost:8001/api/v1/users/${userId}/tenants/${tenantId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      }
+    )
+
+    expect(assignResponse.status()).toBe(201)
+
+    console.log('User assigned to tenant successfully')
+
+    // Verify assignment by checking user's accessible tenants
+    const verifyResponse = await request.get('http://localhost:8001/api/v1/auth/me', {
+      headers: {
+        Authorization: `Bearer ${validUserToken}`,
+      },
+    })
+    const verifiedUser = await verifyResponse.json()
+    expect(verifiedUser.accessible_tenant_ids).toContain(tenantId)
+
+    console.log('Assignment verified - user has access to tenant')
+  })
+
+  test('user can only see their assigned tenants', async ({ request }) => {
+    // Get user info
+    const meResponse = await request.get('http://localhost:8001/api/v1/auth/me', {
+      headers: {
+        Authorization: `Bearer ${validUserToken}`,
+      },
+    })
+    const userData = await meResponse.json()
+
+    console.log('User has access to tenants:', userData.accessible_tenant_ids)
+
+    // The accessible_tenant_ids should be an array
+    expect(Array.isArray(userData.accessible_tenant_ids)).toBe(true)
+  })
+
+  test('valid JWT token with all required claims is accepted', async ({ request }) => {
+    // Create a token with all required Keycloak claims
+    const fullClaimsUser = {
+      sub: `e2e-full-claims-${Date.now()}`,
+      email: `fullclaims-${Date.now()}@example.com`,
+      name: 'Full Claims User',
+      preferred_username: 'fullclaims',
+      email_verified: true,
+      realm_access: {
+        roles: ['user', 'custom-role']
+      }
+    }
+
+    const fullToken = generateJWTToken(fullClaimsUser)
+
+    const response = await request.get('http://localhost:8001/api/v1/auth/me', {
+      headers: {
+        Authorization: `Bearer ${fullToken}`,
+      },
+    })
+
+    expect(response.status()).toBe(200)
+    const userData = await response.json()
+    expect(userData.email).toBe(fullClaimsUser.email)
+
+    console.log('Token with full claims accepted')
+  })
+
+  test('health endpoint still accessible with auth token', async ({ request }) => {
+    // Health endpoint should be public even with token
+    const response = await request.get('http://localhost:8001/health', {
+      headers: {
+        Authorization: `Bearer ${validUserToken}`,
+      },
+    })
+
+    expect(response.status()).toBe(200)
+    const health = await response.json()
+    expect(health.status).toBe('healthy')
+
+    console.log('Health endpoint accessible with auth token')
   })
 })

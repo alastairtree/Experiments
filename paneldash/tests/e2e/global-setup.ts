@@ -9,6 +9,9 @@ dotenv.config({ path: join(__dirname, '../../e2e.env') })
 const processes: { name: string; pid: number }[] = []
 const ROOT_DIR = join(__dirname, '../..')
 
+// Database connection details (will be set by pgserver)
+let dbConnectionDetails: { host: string; port: number } = { host: 'localhost', port: 5433 }
+
 async function waitForUrl(url: string, timeout = 60000): Promise<void> {
   const start = Date.now()
   while (Date.now() - start < timeout) {
@@ -69,8 +72,98 @@ export default async function globalSetup() {
   console.log('\n=== Starting E2E Test Infrastructure ===\n')
 
   try {
-    // 1. Start WireMock (Keycloak Mock)
-    console.log('1. Starting WireMock (Keycloak Mock)...')
+    // 1. Start PostgreSQL Database using pgserver
+    console.log('1. Starting PostgreSQL Database (pgserver)...')
+
+    const dbReady = await new Promise<boolean>((resolve, reject) => {
+      const dbProc = spawn(
+        'uv',
+        ['run', 'python', join(ROOT_DIR, 'tests/e2e/start-test-db.py')],
+        {
+          cwd: join(ROOT_DIR, 'backend'),
+          stdio: 'pipe',
+          detached: false,
+        }
+      )
+
+      let connectionInfo: Record<string, string> = {}
+
+      dbProc.stdout?.on('data', (data) => {
+        const output = data.toString().trim()
+        const lines = output.split('\n')
+
+        for (const line of lines) {
+          if (line.includes('=')) {
+            const [key, value] = line.split('=')
+            connectionInfo[key] = value
+            console.log(`[postgres] ${line}`)
+
+            if (key === 'READY' && value === 'true') {
+              // Extract connection details
+              dbConnectionDetails.host = connectionInfo.PGHOST || 'localhost'
+              dbConnectionDetails.port = parseInt(connectionInfo.PGPORT || '5432')
+              resolve(true)
+            }
+          }
+        }
+      })
+
+      dbProc.stderr?.on('data', (data) => {
+        const output = data.toString().trim()
+        if (output) console.error(`[postgres] ${output}`)
+      })
+
+      dbProc.on('error', (error) => {
+        reject(error)
+      })
+
+      if (dbProc.pid) {
+        processes.push({ name: 'postgres', pid: dbProc.pid })
+      }
+
+      // Timeout after 30 seconds
+      setTimeout(() => reject(new Error('Timeout waiting for database')), 30000)
+    })
+
+    console.log(`✓ PostgreSQL ready on ${dbConnectionDetails.host}:${dbConnectionDetails.port}\n`)
+
+    // 2. Run Database Migrations
+    console.log('2. Running Database Migrations...')
+    const migrateResult = await new Promise<number>((resolve) => {
+      const migrateProc = spawn('uv', ['run', 'alembic', 'upgrade', 'head'], {
+        cwd: join(ROOT_DIR, 'backend'),
+        env: {
+          ...process.env,
+          CENTRAL_DB_HOST: dbConnectionDetails.host,
+          CENTRAL_DB_PORT: dbConnectionDetails.port.toString(),
+          CENTRAL_DB_NAME: 'postgres',
+          CENTRAL_DB_USER: 'postgres',
+          CENTRAL_DB_PASSWORD: '',
+        },
+        stdio: 'pipe',
+      })
+
+      migrateProc.stdout?.on('data', (data) => {
+        console.log(`[migrate] ${data.toString().trim()}`)
+      })
+
+      migrateProc.stderr?.on('data', (data) => {
+        const output = data.toString().trim()
+        if (output) console.error(`[migrate] ${output}`)
+      })
+
+      migrateProc.on('close', (code) => {
+        resolve(code || 0)
+      })
+    })
+
+    if (migrateResult !== 0) {
+      throw new Error('Database migration failed')
+    }
+    console.log('✓ Migrations complete\n')
+
+    // 3. Start WireMock (Keycloak Mock)
+    console.log('3. Starting WireMock (Keycloak Mock)...')
     const wiremockProc = startProcess(
       'wiremock',
       'java',
@@ -91,8 +184,8 @@ export default async function globalSetup() {
     await waitForUrl(`http://localhost:${process.env.WIREMOCK_PORT || 8081}/__admin/`)
     console.log('✓ WireMock ready\n')
 
-    // 2. Start Backend API
-    console.log('2. Starting Backend API...')
+    // 4. Start Backend API
+    console.log('4. Starting Backend API...')
     const backendProc = startProcess(
       'backend',
       'uv',
@@ -107,9 +200,11 @@ export default async function globalSetup() {
       ],
       join(ROOT_DIR, 'backend'),
       {
-        // Backend will use environment variables or defaults
-        ...(process.env.CENTRAL_DB_HOST && { CENTRAL_DB_HOST: process.env.CENTRAL_DB_HOST }),
-        ...(process.env.CENTRAL_DB_PORT && { CENTRAL_DB_PORT: process.env.CENTRAL_DB_PORT }),
+        CENTRAL_DB_HOST: dbConnectionDetails.host,
+        CENTRAL_DB_PORT: dbConnectionDetails.port.toString(),
+        CENTRAL_DB_NAME: 'postgres',
+        CENTRAL_DB_USER: 'postgres',
+        CENTRAL_DB_PASSWORD: '',
         KEYCLOAK_SERVER_URL: process.env.KEYCLOAK_SERVER_URL || 'http://localhost:8081',
         KEYCLOAK_REALM: process.env.KEYCLOAK_REALM || 'paneldash',
         KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID || 'paneldash-api',
@@ -120,8 +215,8 @@ export default async function globalSetup() {
     await waitForUrl(`http://localhost:${process.env.BACKEND_PORT || 8001}/health`)
     console.log('✓ Backend API ready\n')
 
-    // 3. Start Frontend
-    console.log('3. Starting Frontend...')
+    // 5. Start Frontend
+    console.log('5. Starting Frontend...')
     const frontendProc = startProcess(
       'frontend',
       'npm',
@@ -149,11 +244,12 @@ export default async function globalSetup() {
 
     // Save process IDs for teardown
     const pidsFile = join(ROOT_DIR, 'tests/e2e/.pids.json')
-    writeFileSync(pidsFile, JSON.stringify(processes, null, 2))
+    writeFileSync(pidsFile, JSON.stringify({ processes }, null, 2))
 
     console.log('=== All E2E services ready! ===\n')
   } catch (error) {
     console.error('Failed to start E2E infrastructure:', error)
+
     // Kill any started processes
     processes.forEach(({ name, pid }) => {
       console.log(`Killing ${name} (${pid})...`)
@@ -163,6 +259,7 @@ export default async function globalSetup() {
         // Process may already be dead
       }
     })
+
     throw error
   }
 }

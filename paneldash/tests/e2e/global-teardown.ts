@@ -1,5 +1,6 @@
 import { readFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
+import { spawn } from 'child_process'
 
 export default async function globalTeardown() {
   console.log('\n=== Stopping E2E Test Infrastructure ===\n')
@@ -9,7 +10,8 @@ export default async function globalTeardown() {
 
   try {
     const pidsData = readFileSync(pidsFile, 'utf-8')
-    const processes: { name: string; pid: number }[] = JSON.parse(pidsData)
+    const data = JSON.parse(pidsData)
+    const processes: { name: string; pid: number }[] = data.processes || data
 
     // Kill processes in reverse order
     for (const { name, pid } of processes.reverse()) {
