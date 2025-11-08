@@ -1,7 +1,6 @@
 """Integration tests for authentication endpoints."""
 
 from unittest.mock import patch
-from uuid import UUID
 
 import pytest
 from httpx import AsyncClient

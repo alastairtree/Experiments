@@ -360,17 +360,7 @@ class PanelFactory:
         )
 
         # Type-safe panel creation with proper type hints
-        if isinstance(config, TimeSeriesPanelConfig):
-            return panel_class(panel_id, config)
-        elif isinstance(config, KPIPanelConfig):
-            return panel_class(panel_id, config)
-        elif isinstance(config, HealthStatusPanelConfig):
-            return panel_class(panel_id, config)
-        elif isinstance(config, TablePanelConfig):
-            return panel_class(panel_id, config)
-        elif isinstance(config, CustomImagePanelConfig):
-            return panel_class(panel_id, config)
-        elif isinstance(config, CustomTemplatePanelConfig):
+        if isinstance(config, TimeSeriesPanelConfig) or isinstance(config, KPIPanelConfig) or isinstance(config, HealthStatusPanelConfig) or isinstance(config, TablePanelConfig) or isinstance(config, CustomImagePanelConfig) or isinstance(config, CustomTemplatePanelConfig):
             return panel_class(panel_id, config)
         else:
             # This should never happen due to Pydantic validation

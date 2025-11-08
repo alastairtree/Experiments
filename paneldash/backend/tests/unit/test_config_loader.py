@@ -8,7 +8,6 @@ from app.schemas.config import PanelType
 from app.services.config_loader import (
     ConfigLoader,
     ConfigNotFoundError,
-    ConfigValidationError,
 )
 
 

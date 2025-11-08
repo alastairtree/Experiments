@@ -3,7 +3,6 @@
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
 
 import yaml
 from pydantic import ValidationError
@@ -82,7 +81,7 @@ class ConfigLoader:
             )
 
         try:
-            with open(dashboard_file, "r", encoding="utf-8") as f:
+            with open(dashboard_file, encoding="utf-8") as f:
                 raw_config = yaml.safe_load(f)
 
             config = DashboardConfigRoot.model_validate(raw_config)
@@ -122,7 +121,7 @@ class ConfigLoader:
             raise ConfigNotFoundError(f"Panel config not found: {panel_file}")
 
         try:
-            with open(panel_file, "r", encoding="utf-8") as f:
+            with open(panel_file, encoding="utf-8") as f:
                 raw_config = yaml.safe_load(f)
 
             panel_root = PanelConfigRoot.model_validate(raw_config)

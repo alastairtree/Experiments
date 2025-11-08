@@ -1,5 +1,7 @@
 """Unit tests for panel factory service."""
 
+from pathlib import Path
+
 import pytest
 
 from app.schemas.config import PanelType
@@ -18,7 +20,6 @@ from app.services.panel_factory import (
     get_panel_factory,
     get_panel_registry,
 )
-from pathlib import Path
 
 
 @pytest.fixture

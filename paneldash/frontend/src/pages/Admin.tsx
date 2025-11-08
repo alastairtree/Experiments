@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiClient, User, Tenant } from '../api/client'
+import { apiClient, User } from '../api/client'
 import Header from '../components/Header'
 
 export default function Admin() {
