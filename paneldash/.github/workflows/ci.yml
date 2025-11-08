@@ -206,6 +206,7 @@ jobs:
         with:
           name: playwright-html-report
           path: paneldash/tests/e2e/playwright-report/
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Upload test results (screenshots, videos, traces)
@@ -214,6 +215,7 @@ jobs:
         with:
           name: e2e-test-results
           path: paneldash/tests/e2e/test-results/
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Upload JUnit test results
@@ -222,6 +224,7 @@ jobs:
         with:
           name: junit-results
           path: paneldash/tests/e2e/junit-results.xml
+          if-no-files-found: warn
           retention-days: 30
 
   summary:
