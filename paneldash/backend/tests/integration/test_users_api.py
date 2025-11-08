@@ -5,17 +5,20 @@ from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.central import User
 
 
 @pytest.fixture
 def mock_admin_token() -> dict[str, object]:
-    """Mock Keycloak token for admin user."""
+    """Mock Keycloak token for admin user with unique ID."""
+    import time
+
+    unique_id = f"admin-{int(time.time() * 1000000)}"
     return {
-        "sub": "admin-456",
-        "email": "admin@example.com",
+        "sub": unique_id,
+        "email": f"{unique_id}@example.com",
         "name": "Admin User",
         "email_verified": True,
         "realm_access": {"roles": ["admin"]},
@@ -24,10 +27,13 @@ def mock_admin_token() -> dict[str, object]:
 
 @pytest.fixture
 def mock_user_token() -> dict[str, object]:
-    """Mock Keycloak token for regular user."""
+    """Mock Keycloak token for regular user with unique ID."""
+    import time
+
+    unique_id = f"user-{int(time.time() * 1000000)}"
     return {
-        "sub": "user-123",
-        "email": "user@example.com",
+        "sub": unique_id,
+        "email": f"{unique_id}@example.com",
         "name": "Regular User",
         "email_verified": True,
         "realm_access": {"roles": ["user"]},
@@ -35,31 +41,31 @@ def mock_user_token() -> dict[str, object]:
 
 
 @pytest.fixture
-async def test_users(test_db_url: str) -> list[UUID]:
-    """Create test users and return their IDs."""
-    engine = create_async_engine(test_db_url, echo=False)
-    user_ids: list[UUID] = []
-    try:
-        async with engine.begin() as conn:
-            user1 = User(
-                keycloak_id="user-1",
-                email="user1@example.com",
-                full_name="User One",
-                is_admin=False,
-            )
-            user2 = User(
-                keycloak_id="user-2",
-                email="user2@example.com",
-                full_name="User Two",
-                is_admin=False,
-            )
-            conn.add(user1)
-            conn.add(user2)
-            await conn.flush()
-            user_ids = [user1.id, user2.id]
-        return user_ids
-    finally:
-        await engine.dispose()
+async def test_users(db_session: AsyncSession) -> list[UUID]:
+    """Create test users with unique IDs and return their UUIDs."""
+    import time
+
+    unique_id1 = f"user-1-{int(time.time() * 1000000)}"
+    unique_id2 = f"user-2-{int(time.time() * 1000000)}"
+
+    user1 = User(
+        keycloak_id=unique_id1,
+        email=f"{unique_id1}@example.com",
+        full_name="User One",
+        is_admin=False,
+    )
+    user2 = User(
+        keycloak_id=unique_id2,
+        email=f"{unique_id2}@example.com",
+        full_name="User Two",
+        is_admin=False,
+    )
+    db_session.add(user1)
+    db_session.add(user2)
+    await db_session.commit()
+    await db_session.refresh(user1)
+    await db_session.refresh(user2)
+    return [user1.id, user2.id]
 
 
 class TestUserEndpoints:
@@ -69,25 +75,20 @@ class TestUserEndpoints:
     async def test_list_users_as_admin(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         test_users: list[UUID],  # noqa: ARG002
         mock_admin_token: dict[str, object],
     ) -> None:
         """Test listing all users as admin."""
         # Create admin user
-        engine = create_async_engine(test_db_url, echo=False)
-        try:
-            async with engine.begin() as conn:
-                admin = User(
-                    keycloak_id="admin-456",
-                    email="admin@example.com",
-                    full_name="Admin User",
-                    is_admin=True,
-                )
-                conn.add(admin)
-        finally:
-            await engine.dispose()
+        admin = User(
+            keycloak_id="admin-456",
+            email="admin@example.com",
+            full_name="Admin User",
+            is_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
 
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
             mock_verify.return_value = mock_admin_token
@@ -110,24 +111,19 @@ class TestUserEndpoints:
     async def test_list_users_as_regular_user_forbidden(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         mock_user_token: dict[str, object],
     ) -> None:
         """Test listing users as regular user returns 403."""
         # Create regular user
-        engine = create_async_engine(test_db_url, echo=False)
-        try:
-            async with engine.begin() as conn:
-                user = User(
-                    keycloak_id="user-123",
-                    email="user@example.com",
-                    full_name="Regular User",
-                    is_admin=False,
-                )
-                conn.add(user)
-        finally:
-            await engine.dispose()
+        user = User(
+            keycloak_id="user-123",
+            email="user@example.com",
+            full_name="Regular User",
+            is_admin=False,
+        )
+        db_session.add(user)
+        await db_session.commit()
 
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
             mock_verify.return_value = mock_user_token
@@ -143,8 +139,7 @@ class TestUserEndpoints:
     async def test_get_user_by_id(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         test_users: list[UUID],
         mock_admin_token: dict[str, object],
     ) -> None:
@@ -152,18 +147,14 @@ class TestUserEndpoints:
         user_id = test_users[0]
 
         # Create admin user
-        engine = create_async_engine(test_db_url, echo=False)
-        try:
-            async with engine.begin() as conn:
-                admin = User(
-                    keycloak_id="admin-456",
-                    email="admin@example.com",
-                    full_name="Admin User",
-                    is_admin=True,
-                )
-                conn.add(admin)
-        finally:
-            await engine.dispose()
+        admin = User(
+            keycloak_id="admin-456",
+            email="admin@example.com",
+            full_name="Admin User",
+            is_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
 
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
             mock_verify.return_value = mock_admin_token
@@ -184,24 +175,19 @@ class TestUserEndpoints:
     async def test_get_nonexistent_user(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         mock_admin_token: dict[str, object],
     ) -> None:
         """Test getting nonexistent user returns 404."""
         # Create admin user
-        engine = create_async_engine(test_db_url, echo=False)
-        try:
-            async with engine.begin() as conn:
-                admin = User(
-                    keycloak_id="admin-456",
-                    email="admin@example.com",
-                    full_name="Admin User",
-                    is_admin=True,
-                )
-                conn.add(admin)
-        finally:
-            await engine.dispose()
+        admin = User(
+            keycloak_id="admin-456",
+            email="admin@example.com",
+            full_name="Admin User",
+            is_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
 
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
             mock_verify.return_value = mock_admin_token
@@ -220,8 +206,7 @@ class TestUserEndpoints:
     async def test_update_user(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         test_users: list[UUID],
         mock_admin_token: dict[str, object],
     ) -> None:
@@ -229,18 +214,14 @@ class TestUserEndpoints:
         user_id = test_users[0]
 
         # Create admin user
-        engine = create_async_engine(test_db_url, echo=False)
-        try:
-            async with engine.begin() as conn:
-                admin = User(
-                    keycloak_id="admin-456",
-                    email="admin@example.com",
-                    full_name="Admin User",
-                    is_admin=True,
-                )
-                conn.add(admin)
-        finally:
-            await engine.dispose()
+        admin = User(
+            keycloak_id="admin-456",
+            email="admin@example.com",
+            full_name="Admin User",
+            is_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
 
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
             mock_verify.return_value = mock_admin_token
@@ -267,8 +248,7 @@ class TestUserEndpoints:
     async def test_update_user_partial(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         test_users: list[UUID],
         mock_admin_token: dict[str, object],
     ) -> None:
@@ -276,18 +256,14 @@ class TestUserEndpoints:
         user_id = test_users[1]
 
         # Create admin user
-        engine = create_async_engine(test_db_url, echo=False)
-        try:
-            async with engine.begin() as conn:
-                admin = User(
-                    keycloak_id="admin-456",
-                    email="admin@example.com",
-                    full_name="Admin User",
-                    is_admin=True,
-                )
-                conn.add(admin)
-        finally:
-            await engine.dispose()
+        admin = User(
+            keycloak_id="admin-456",
+            email="admin@example.com",
+            full_name="Admin User",
+            is_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
 
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
             mock_verify.return_value = mock_admin_token
@@ -312,8 +288,7 @@ class TestUserEndpoints:
     async def test_delete_user(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         test_users: list[UUID],
         mock_admin_token: dict[str, object],
     ) -> None:
@@ -321,18 +296,14 @@ class TestUserEndpoints:
         user_id = test_users[0]
 
         # Create admin user
-        engine = create_async_engine(test_db_url, echo=False)
-        try:
-            async with engine.begin() as conn:
-                admin = User(
-                    keycloak_id="admin-456",
-                    email="admin@example.com",
-                    full_name="Admin User",
-                    is_admin=True,
-                )
-                conn.add(admin)
-        finally:
-            await engine.dispose()
+        admin = User(
+            keycloak_id="admin-456",
+            email="admin@example.com",
+            full_name="Admin User",
+            is_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
 
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
             mock_verify.return_value = mock_admin_token
@@ -355,8 +326,7 @@ class TestUserEndpoints:
     async def test_delete_user_as_regular_user_forbidden(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         test_users: list[UUID],
         mock_user_token: dict[str, object],
     ) -> None:
@@ -364,18 +334,14 @@ class TestUserEndpoints:
         user_id = test_users[0]
 
         # Create regular user
-        engine = create_async_engine(test_db_url, echo=False)
-        try:
-            async with engine.begin() as conn:
-                user = User(
-                    keycloak_id="user-123",
-                    email="user@example.com",
-                    full_name="Regular User",
-                    is_admin=False,
-                )
-                conn.add(user)
-        finally:
-            await engine.dispose()
+        user = User(
+            keycloak_id="user-123",
+            email="user@example.com",
+            full_name="Regular User",
+            is_admin=False,
+        )
+        db_session.add(user)
+        await db_session.commit()
 
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
             mock_verify.return_value = mock_user_token

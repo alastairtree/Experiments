@@ -1,6 +1,6 @@
 """Integration tests for authentication endpoints."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from uuid import UUID
 
 import pytest
@@ -8,15 +8,18 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.central import User, UserTenant
+from app.models.central import User
 
 
 @pytest.fixture
 def mock_keycloak_token() -> dict[str, object]:
-    """Mock Keycloak token payload."""
+    """Mock Keycloak token payload with unique ID."""
+    import time
+
+    unique_id = f"keycloak-user-{int(time.time() * 1000000)}"
     return {
-        "sub": "keycloak-user-123",
-        "email": "test@example.com",
+        "sub": unique_id,
+        "email": f"test-{unique_id}@example.com",
         "name": "Test User",
         "preferred_username": "testuser",
         "email_verified": True,
@@ -26,10 +29,13 @@ def mock_keycloak_token() -> dict[str, object]:
 
 @pytest.fixture
 def mock_admin_token() -> dict[str, object]:
-    """Mock Keycloak admin token payload."""
+    """Mock Keycloak admin token payload with unique ID."""
+    import time
+
+    unique_id = f"keycloak-admin-{int(time.time() * 1000000)}"
     return {
-        "sub": "keycloak-admin-456",
-        "email": "admin@example.com",
+        "sub": unique_id,
+        "email": f"admin-{unique_id}@example.com",
         "name": "Admin User",
         "preferred_username": "adminuser",
         "email_verified": True,
@@ -44,12 +50,12 @@ class TestAuthEndpoints:
     async def test_auth_me_creates_new_user(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         mock_keycloak_token: dict[str, object],
     ) -> None:
         """Test /auth/me endpoint creates new user on first login."""
-        from sqlalchemy.ext.asyncio import create_async_engine
+        keycloak_id = str(mock_keycloak_token["sub"])
+        email = str(mock_keycloak_token["email"])
 
         # Mock the Keycloak token verification
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
@@ -64,57 +70,45 @@ class TestAuthEndpoints:
             data = response.json()
 
             # Verify response contains user info
-            assert data["email"] == "test@example.com"
+            assert data["email"] == email
             assert data["full_name"] == "Test User"
-            assert data["keycloak_id"] == "keycloak-user-123"
+            assert data["keycloak_id"] == keycloak_id
             assert data["is_admin"] is False
             assert data["accessible_tenant_ids"] == []
 
             # Verify user was created in database
-            engine = create_async_engine(test_db_url, echo=False)
-            try:
-                async with engine.begin() as conn:
-                    from sqlalchemy import select
+            result = await db_session.execute(
+                select(User).where(User.keycloak_id == keycloak_id)
+            )
+            user = result.scalar_one_or_none()
 
-                    result = await conn.execute(
-                        select(User).where(User.keycloak_id == "keycloak-user-123")
-                    )
-                    user = result.scalar_one_or_none()
-
-                    assert user is not None
-                    assert user.email == "test@example.com"
-                    assert user.full_name == "Test User"
-                    assert user.is_admin is False
-            finally:
-                await engine.dispose()
+            assert user is not None
+            assert user.email == email
+            assert user.full_name == "Test User"
+            assert user.is_admin is False
 
     @pytest.mark.asyncio
     async def test_auth_me_existing_user(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
-        test_db_url: str,
+        db_session: AsyncSession,
         mock_keycloak_token: dict[str, object],
     ) -> None:
         """Test /auth/me endpoint with existing user."""
-        from sqlalchemy.ext.asyncio import create_async_engine
+        keycloak_id = str(mock_keycloak_token["sub"])
+        email = str(mock_keycloak_token["email"])
 
         # Create user in database first
-        engine = create_async_engine(test_db_url, echo=False)
-        user_id: UUID
-        try:
-            async with engine.begin() as conn:
-                user = User(
-                    keycloak_id="keycloak-user-123",
-                    email="test@example.com",
-                    full_name="Test User",
-                    is_admin=False,
-                )
-                conn.add(user)
-                await conn.flush()
-                user_id = user.id
-        finally:
-            await engine.dispose()
+        user = User(
+            keycloak_id=keycloak_id,
+            email=email,
+            full_name="Test User",
+            is_admin=False,
+        )
+        db_session.add(user)
+        await db_session.commit()
+        await db_session.refresh(user)
+        user_id = user.id
 
         # Mock the Keycloak token verification
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
@@ -130,16 +124,18 @@ class TestAuthEndpoints:
 
             # Verify it returns the existing user
             assert data["id"] == str(user_id)
-            assert data["email"] == "test@example.com"
+            assert data["email"] == email
 
     @pytest.mark.asyncio
     async def test_auth_me_admin_user(
         self,
         client: AsyncClient,
-        test_db: None,  # noqa: ARG002
+        db_session: AsyncSession,  # noqa: ARG002
         mock_admin_token: dict[str, object],
     ) -> None:
         """Test /auth/me endpoint creates admin user correctly."""
+        admin_email = str(mock_admin_token["email"])
+
         with patch("app.auth.dependencies.keycloak_auth.verify_token") as mock_verify:
             mock_verify.return_value = mock_admin_token
 
@@ -152,7 +148,7 @@ class TestAuthEndpoints:
 
             # Verify admin flag is set
             assert data["is_admin"] is True
-            assert data["email"] == "admin@example.com"
+            assert data["email"] == admin_email
 
     @pytest.mark.asyncio
     async def test_auth_me_without_token(self, client: AsyncClient) -> None:

@@ -10,17 +10,42 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pgserver import get_server  # type: ignore[attr-defined]
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.main import app
 
 
 @pytest.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
+async def client(test_db_url: str) -> AsyncGenerator[AsyncClient, None]:
     """Create an async test client for the FastAPI app."""
+    # Override the database dependency to use test database
+    from collections.abc import AsyncGenerator as AG
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.database import get_central_db
+
+    engine = create_async_engine(test_db_url, echo=False)
+    test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def override_get_central_db() -> AG[AsyncSession, None]:
+        async with test_session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    app.dependency_overrides[get_central_db] = override_get_central_db
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+    # Clean up override
+    app.dependency_overrides.clear()
+    await engine.dispose()
 
 
 @pytest.fixture(scope="session")
@@ -125,14 +150,9 @@ async def db_session(test_db: None, test_db_url: str) -> AsyncGenerator[AsyncSes
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+        yield session
+        # Note: We don't commit here because API endpoints handle their own transactions
+        # Tests should use unique IDs to avoid conflicts
 
     await engine.dispose()
 
