@@ -72,7 +72,9 @@ class KeycloakClient:
         except requests.RequestException as e:
             raise KeycloakAPIError(
                 f"Failed to get admin token: {e}",
-                status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,
+                status_code=getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None,
             )
 
     def _get_headers(self) -> Dict[str, str]:
@@ -123,27 +125,18 @@ class KeycloakClient:
         target_realm = realm or self.realm
         url = f"{self.base_url}/admin/realms/{target_realm}/users"
 
+        # Note: Keycloak requires email, firstName, and lastName to be set for accounts
+        # created via API to avoid "Account is not fully set up" errors during password grant.
+        # Provide defaults if not specified.
         user_data: Dict[str, Any] = {
             "username": username,
             "enabled": enabled,
-            "credentials": [
-                {
-                    "type": "password",
-                    "value": password,
-                    "temporary": False,
-                }
-            ],
+            "email": email or f"{username}@example.com",
+            "emailVerified": True,
+            "firstName": first_name or "Test",
+            "lastName": last_name or "User",
+            "requiredActions": [],
         }
-
-        if email:
-            user_data["email"] = email
-            user_data["emailVerified"] = True
-
-        if first_name:
-            user_data["firstName"] = first_name
-
-        if last_name:
-            user_data["lastName"] = last_name
 
         try:
             response = requests.post(
@@ -170,6 +163,40 @@ class KeycloakClient:
                 # Fallback: query to get user ID
                 user_id = self._get_user_id_by_username(username, target_realm)
 
+            # Set password via dedicated reset-password endpoint
+            # This is more reliable than setting credentials during user creation
+            password_url = f"{self.base_url}/admin/realms/{target_realm}/users/{user_id}/reset-password"
+            password_data = {
+                "type": "password",
+                "value": password,
+                "temporary": False,
+            }
+            try:
+                pwd_resp = requests.put(
+                    password_url,
+                    json=password_data,
+                    headers=self._get_headers(),
+                    timeout=30
+                )
+                pwd_resp.raise_for_status()
+                logger.info(f"Set password for user {user_id}")
+            except requests.RequestException as e:
+                # If password setting fails, delete the user and raise error
+                try:
+                    self.delete_user(user_id, target_realm)
+                except Exception:
+                    pass
+                raise KeycloakAPIError(
+                    f"Failed to set password for user '{username}': {e}",
+                    status_code=getattr(e.response, "status_code", None)
+                    if hasattr(e, "response")
+                    else None,
+                )
+
+            # Assign default realm role to ensure user is fully set up
+            # This prevents "Account is not fully set up" error during password grant
+            self._assign_default_realm_roles(user_id, target_realm)
+
             logger.info(f"Created user '{username}' with ID: {user_id}")
             return user_id
 
@@ -178,8 +205,70 @@ class KeycloakClient:
         except requests.RequestException as e:
             raise KeycloakAPIError(
                 f"Failed to create user '{username}': {e}",
-                status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,
+                status_code=getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None,
             )
+
+    def _assign_default_realm_roles(self, user_id: str, realm: str) -> None:
+        """
+        Assign default realm roles to a user.
+
+        This ensures users have at least the default-roles assigned,
+        which prevents "Account is not fully set up" errors.
+
+        Args:
+            user_id: User ID
+            realm: Realm name
+        """
+        # Get the roles for the realm
+        url = f"{self.base_url}/admin/realms/{realm}/roles"
+
+        try:
+            # Get all roles
+            response = requests.get(
+                url,
+                headers=self._get_headers(),
+                timeout=30,
+            )
+            response.raise_for_status()
+            roles = response.json()
+
+            # First try to assign the "user" role (commonly used basic role)
+            user_role = next((r for r in roles if r["name"] == "user"), None)
+
+            # If "user" role exists, assign it
+            if user_role:
+                assign_url = f"{self.base_url}/admin/realms/{realm}/users/{user_id}/role-mappings/realm"
+                response = requests.post(
+                    assign_url,
+                    json=[user_role],
+                    headers=self._get_headers(),
+                    timeout=30,
+                )
+                response.raise_for_status()
+                logger.info(f"Assigned 'user' realm role to user {user_id}")
+            else:
+                # Fallback: assign default-roles composite role
+                default_role_name = f"default-roles-{realm}"
+                default_role = next((r for r in roles if r["name"] == default_role_name), None)
+
+                if default_role:
+                    assign_url = f"{self.base_url}/admin/realms/{realm}/users/{user_id}/role-mappings/realm"
+                    response = requests.post(
+                        assign_url,
+                        json=[default_role],
+                        headers=self._get_headers(),
+                        timeout=30,
+                    )
+                    response.raise_for_status()
+                    logger.info(f"Assigned default-roles-{realm} to user {user_id}")
+                else:
+                    logger.warning(f"No 'user' or default realm roles found in realm {realm}")
+
+        except requests.RequestException as e:
+            # Don't fail user creation if role assignment fails
+            logger.error(f"Failed to assign default roles to user {user_id}: {e}")
 
     def _get_user_id_by_username(self, username: str, realm: str) -> str:
         """
@@ -218,7 +307,9 @@ class KeycloakClient:
         except requests.RequestException as e:
             raise KeycloakAPIError(
                 f"Failed to get user ID for '{username}': {e}",
-                status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,
+                status_code=getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None,
             )
 
     def delete_user(self, user_id: str, realm: Optional[str] = None) -> None:
@@ -250,7 +341,9 @@ class KeycloakClient:
         except requests.RequestException as e:
             raise KeycloakAPIError(
                 f"Failed to delete user '{user_id}': {e}",
-                status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,
+                status_code=getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None,
             )
 
     def get_user_token(
@@ -294,9 +387,19 @@ class KeycloakClient:
             return response.json()
 
         except requests.RequestException as e:
+            # Log the error response body for debugging
+            error_detail = ""
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = f" - {e.response.text}"
+                except Exception:
+                    pass
+
             raise KeycloakAPIError(
-                f"Failed to get user token for '{username}': {e}",
-                status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,
+                f"Failed to get user token for '{username}': {e}{error_detail}",
+                status_code=getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None,
             )
 
     def create_realm(self, realm_config: Dict[str, Any]) -> None:
@@ -337,7 +440,9 @@ class KeycloakClient:
         except requests.RequestException as e:
             raise KeycloakAPIError(
                 f"Failed to create realm: {e}",
-                status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,
+                status_code=getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None,
             )
 
     def delete_realm(self, realm: str) -> None:
@@ -367,5 +472,7 @@ class KeycloakClient:
         except requests.RequestException as e:
             raise KeycloakAPIError(
                 f"Failed to delete realm '{realm}': {e}",
-                status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,
+                status_code=getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None,
             )

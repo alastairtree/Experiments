@@ -59,8 +59,8 @@ class TestPytestFixtures:
         """Test that Keycloak server is accessible via HTTP."""
         import requests
 
-        # Check health endpoint
-        response = requests.get(f"{keycloak.get_base_url()}/health/ready", timeout=10)
+        # Check health endpoint (on management port 9000 in Keycloak 26.x)
+        response = requests.get("http://localhost:9000/health/ready", timeout=10)
         assert response.status_code == 200
 
         # Check main endpoint
@@ -345,7 +345,7 @@ class TestPytestFixtures:
     def test_keycloak_user_cleanup_on_test_failure(self, keycloak_user, keycloak_client):
         """Test that temporary users are cleaned up even if test would fail."""
         username = f"cleanup_test_{int(time.time())}"
-        user_id = keycloak_user(username=username, password="cleanup_pass")
+        keycloak_user(username=username, password="cleanup_pass")
 
         # Verify user exists
         token = keycloak_client.get_user_token(

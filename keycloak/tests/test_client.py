@@ -13,6 +13,7 @@ from pytest_keycloak.manager import KeycloakManager
 def test_keycloak(tmp_path_factory):
     """Module-scoped Keycloak instance for client tests."""
     tmp_path = tmp_path_factory.mktemp("keycloak-client-tests")
+    print(f"Using temporary path for Keycloak: {tmp_path}")
     manager = KeycloakManager(
         version="26.0.7",
         install_dir=tmp_path / "keycloak",

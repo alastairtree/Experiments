@@ -87,8 +87,8 @@ class TestKeycloakManagerIntegration:
             # Verify it's running
             assert manager.is_running()
 
-            # Verify health endpoint
-            response = requests.get(f"{manager.get_base_url()}/health/ready", timeout=10)
+            # Verify health endpoint (on management port 9000 in Keycloak 26.x)
+            response = requests.get("http://localhost:9000/health/ready", timeout=10)
             assert response.status_code == 200
 
             # Verify admin console is accessible
@@ -115,9 +115,7 @@ class TestKeycloakManagerIntegration:
                 {
                     "username": "intuser",
                     "enabled": True,
-                    "credentials": [
-                        {"type": "password", "value": "intpass", "temporary": False}
-                    ],
+                    "credentials": [{"type": "password", "value": "intpass", "temporary": False}],
                 }
             ],
             "clients": [

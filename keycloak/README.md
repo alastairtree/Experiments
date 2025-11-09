@@ -32,6 +32,10 @@ You should see Java 17 or higher. If not, install from:
 ## Installation
 
 ```bash
+# wiremock dependency on java
+sudo apt update -y && sudo apt install -y default-jdk
+
+# TODO: publish release
 pip install pytest-keycloak-fixture
 ```
 
@@ -472,10 +476,10 @@ def keycloak_config():
 ```bash
 # Clone repository
 git clone https://github.com/yourusername/pytest-keycloak-fixture.git
-cd pytest-keycloak-fixture
+cd pytest-keycloak-fixture/keycloak
 
 # Install in development mode
-pip install -e .[dev]
+pip install -e '.[dev]'
 
 # Run tests
 pytest tests/

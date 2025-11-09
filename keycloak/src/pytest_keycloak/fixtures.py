@@ -1,6 +1,7 @@
 """Pytest fixtures for Keycloak testing."""
 
 import logging
+import sys
 from typing import Callable, Generator
 
 import pytest
@@ -10,6 +11,20 @@ from .config import ClientConfig, KeycloakConfig, RealmConfig, UserConfig
 from .manager import KeycloakManager
 
 logger = logging.getLogger(__name__)
+
+
+def pytest_configure(config):
+    """Configure pytest plugin and logging."""
+    # Configure logging to show INFO messages during tests
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s [%(name)s] %(message)s",
+        stream=sys.stdout,
+        force=True,
+    )
+
+    # Set our package loggers to INFO
+    logging.getLogger("pytest_keycloak").setLevel(logging.INFO)
 
 
 @pytest.fixture(scope="session")
@@ -79,24 +94,25 @@ def keycloak(keycloak_config: KeycloakConfig) -> Generator[KeycloakManager, None
     )
 
     # Download and install if needed
-    logger.info("Downloading and installing Keycloak if needed...")
+    logger.info("📦 Downloading and installing Keycloak if needed...")
     manager.download_and_install()
 
     # Start with realm config if provided
     realm_json = None
     if keycloak_config.realm:
         realm_json = keycloak_config.realm.to_keycloak_json()
-        logger.info(f"Starting Keycloak with realm: {keycloak_config.realm.realm}")
+        logger.info(f"🔧 Preparing to start Keycloak with realm: {keycloak_config.realm.realm}")
 
     manager.start(realm_config=realm_json, wait_for_ready=True)
 
     yield manager
 
     # Cleanup
-    logger.info("Stopping Keycloak...")
+    logger.info("🧹 Cleaning up Keycloak session fixture...")
     manager.stop()
 
     if keycloak_config.auto_cleanup:
+        logger.info("🗑️  Removing Keycloak installation...")
         manager.cleanup()
 
 
@@ -161,6 +177,7 @@ def keycloak_user(keycloak_client: KeycloakClient) -> Generator[Callable[..., st
         Returns:
             User ID
         """
+        logger.info(f"👤 Creating temporary user: {username}")
         user_id = keycloak_client.create_user(username, password, **kwargs)
         created_users.append(user_id)
         return user_id
@@ -168,9 +185,11 @@ def keycloak_user(keycloak_client: KeycloakClient) -> Generator[Callable[..., st
     yield _create_user
 
     # Cleanup
+    if created_users:
+        logger.info(f"🧹 Cleaning up {len(created_users)} temporary user(s)...")
     for user_id in created_users:
         try:
             keycloak_client.delete_user(user_id)
-            logger.debug(f"Cleaned up temporary user: {user_id}")
+            logger.debug(f"   Deleted user: {user_id}")
         except Exception as e:
-            logger.warning(f"Failed to clean up user {user_id}: {e}")
+            logger.warning(f"   Failed to delete user {user_id}: {e}")

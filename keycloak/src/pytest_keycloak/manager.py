@@ -106,9 +106,7 @@ class KeycloakManager:
                 if major_version >= 17:
                     return True
                 else:
-                    raise JavaNotFoundError(
-                        f"Java {major_version} found, but Java 17+ is required"
-                    )
+                    raise JavaNotFoundError(f"Java {major_version} found, but Java 17+ is required")
             else:
                 raise JavaNotFoundError("Could not parse Java version")
 
@@ -234,7 +232,7 @@ class KeycloakManager:
         """
         with self._lock:
             if self.is_running():
-                logger.warning("Keycloak is already running")
+                logger.info("ℹ️  Keycloak is already running, skipping start")
                 return
 
             # Ensure Keycloak is installed
@@ -252,7 +250,9 @@ class KeycloakManager:
                 with open(realm_file, "w") as f:
                     json.dump(realm_config, f, indent=2)
 
-                logger.info(f"Realm configuration written to {realm_file}")
+                realm_name = realm_config.get("realm", "unknown")
+                logger.info(f"📝 Configuring Keycloak with realm: {realm_name}")
+                logger.info(f"   Realm configuration written to {realm_file}")
 
             # Prepare log file
             log_dir = self.install_dir / "logs"
@@ -273,15 +273,18 @@ class KeycloakManager:
                 cmd = [str(script)]
 
             # Add arguments
-            cmd.extend([
-                "start-dev",
-                f"--http-port={self.port}",
-            ])
+            cmd.extend(
+                [
+                    "start-dev",
+                    f"--http-port={self.port}",
+                    "--health-enabled=true",  # Enable health endpoints on HTTP port
+                ]
+            )
 
             if realm_config:
                 cmd.append("--import-realm")
 
-            logger.info(f"Starting Keycloak on port {self.port}...")
+            logger.info(f"🚀 Starting Keycloak server on port {self.port}...")
 
             try:
                 # Start process
@@ -304,11 +307,13 @@ class KeycloakManager:
                         f"Keycloak process terminated immediately. Check logs at {self.log_file}"
                     )
 
-                logger.info(f"Keycloak process started (PID: {self.process.pid})")
+                logger.info(f"   Keycloak process started (PID: {self.process.pid})")
 
                 # Wait for readiness
                 if wait_for_ready:
+                    logger.info(f"   Waiting for Keycloak to be ready (timeout: {timeout}s)...")
                     self.wait_for_ready(timeout=timeout)
+                    logger.info(f"✅ Keycloak server is ready on http://localhost:{self.port}")
 
             except Exception as e:
                 if self.process:
@@ -331,13 +336,13 @@ class KeycloakManager:
         """
         with self._lock:
             if not self.is_running():
-                logger.warning("Keycloak is not running")
+                logger.debug("Keycloak is not running, nothing to stop")
                 return
 
             if self.process is None:
                 return
 
-            logger.info("Stopping Keycloak...")
+            logger.info(f"🛑 Stopping Keycloak server (port {self.port})...")
 
             try:
                 # Send SIGTERM
@@ -346,12 +351,13 @@ class KeycloakManager:
                 # Wait for graceful shutdown
                 try:
                     self.process.wait(timeout=timeout)
-                    logger.info("Keycloak stopped gracefully")
+                    logger.info("✅ Keycloak stopped gracefully")
                 except subprocess.TimeoutExpired:
                     # Force kill
-                    logger.warning("Keycloak did not stop gracefully, forcing kill")
+                    logger.warning("⚠️  Keycloak did not stop gracefully, forcing kill")
                     self.process.kill()
                     self.process.wait()
+                    logger.info("✅ Keycloak process killed")
 
             except Exception as e:
                 logger.error(f"Error stopping Keycloak: {e}")
@@ -375,8 +381,11 @@ class KeycloakManager:
         """
         Poll the health endpoint until ready.
 
-        Poll: GET http://localhost:{port}/health/ready
+        Poll: GET http://localhost:9000/health/ready
         Should return 200 when ready.
+
+        Note: In Keycloak 26.x, health endpoints are exposed on the management
+        port 9000 by default, not on the main HTTP port.
 
         Args:
             timeout: Max seconds to wait
@@ -384,7 +393,9 @@ class KeycloakManager:
         Raises:
             KeycloakTimeoutError: If not ready within timeout
         """
-        url = f"http://localhost:{self.port}/health/ready"
+        # Health endpoint is on management port 9000 in Keycloak 26.x
+        management_port = 9000
+        url = f"http://localhost:{management_port}/health/ready"
         start_time = time.time()
         interval = 2
 
@@ -409,8 +420,7 @@ class KeycloakManager:
             time.sleep(interval)
 
         raise KeycloakTimeoutError(
-            f"Keycloak did not become ready within {timeout} seconds. "
-            f"Check logs at {self.log_file}"
+            f"Keycloak did not become ready within {timeout} seconds. Check logs at {self.log_file}"
         )
 
     def get_base_url(self) -> str:

@@ -52,8 +52,16 @@ class RealmConfig(BaseModel):
         realm_data: Dict[str, Any] = {
             "realm": self.realm,
             "enabled": self.enabled,
+            "verifyEmail": False,  # Disable email verification requirement
+            "registrationEmailAsUsername": False,
             "users": [],
             "clients": [],
+            "roles": {
+                "realm": [
+                    {"name": "user", "description": "User role"},
+                    {"name": "admin", "description": "Admin role"},
+                ]
+            },
         }
 
         # Convert users
