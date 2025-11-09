@@ -165,7 +165,9 @@ class KeycloakClient:
 
             # Set password via dedicated reset-password endpoint
             # This is more reliable than setting credentials during user creation
-            password_url = f"{self.base_url}/admin/realms/{target_realm}/users/{user_id}/reset-password"
+            password_url = (
+                f"{self.base_url}/admin/realms/{target_realm}/users/{user_id}/reset-password"
+            )
             password_data = {
                 "type": "password",
                 "value": password,
@@ -173,10 +175,7 @@ class KeycloakClient:
             }
             try:
                 pwd_resp = requests.put(
-                    password_url,
-                    json=password_data,
-                    headers=self._get_headers(),
-                    timeout=30
+                    password_url, json=password_data, headers=self._get_headers(), timeout=30
                 )
                 pwd_resp.raise_for_status()
                 logger.info(f"Set password for user {user_id}")
@@ -239,7 +238,9 @@ class KeycloakClient:
 
             # If "user" role exists, assign it
             if user_role:
-                assign_url = f"{self.base_url}/admin/realms/{realm}/users/{user_id}/role-mappings/realm"
+                assign_url = (
+                    f"{self.base_url}/admin/realms/{realm}/users/{user_id}/role-mappings/realm"
+                )
                 response = requests.post(
                     assign_url,
                     json=[user_role],
@@ -254,7 +255,9 @@ class KeycloakClient:
                 default_role = next((r for r in roles if r["name"] == default_role_name), None)
 
                 if default_role:
-                    assign_url = f"{self.base_url}/admin/realms/{realm}/users/{user_id}/role-mappings/realm"
+                    assign_url = (
+                        f"{self.base_url}/admin/realms/{realm}/users/{user_id}/role-mappings/realm"
+                    )
                     response = requests.post(
                         assign_url,
                         json=[default_role],

@@ -57,3 +57,17 @@ def pytest_configure(config):
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
     config.addinivalue_line("markers", "integration: marks tests as integration tests")
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """Ensure complete cleanup between tests to avoid port conflicts."""
+    import subprocess
+    import time
+
+    # Kill any lingering Java/Keycloak processes to prevent port conflicts
+    try:
+        subprocess.run(["pkill", "-9", "-f", "keycloak"], capture_output=True, timeout=5)
+        # Small delay to ensure ports are released
+        time.sleep(0.5)
+    except Exception:
+        pass  # Ignore errors if no processes to kill

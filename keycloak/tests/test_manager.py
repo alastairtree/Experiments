@@ -111,10 +111,15 @@ class TestKeycloakManagerIntegration:
         realm_config = {
             "realm": "integration-test-realm",
             "enabled": True,
+            "verifyEmail": False,
             "users": [
                 {
                     "username": "intuser",
                     "enabled": True,
+                    "email": "intuser@example.com",
+                    "emailVerified": True,
+                    "firstName": "Integration",
+                    "lastName": "User",
                     "credentials": [{"type": "password", "value": "intpass", "temporary": False}],
                 }
             ],
@@ -126,6 +131,11 @@ class TestKeycloakManagerIntegration:
                     "directAccessGrantsEnabled": True,
                 }
             ],
+            "roles": {
+                "realm": [
+                    {"name": "user", "description": "User role"},
+                ]
+            },
         }
 
         try:
