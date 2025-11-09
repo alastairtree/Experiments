@@ -26,8 +26,8 @@ export default defineConfig({
     // Trace: capture detailed debugging info on failure
     trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
 
-    // Screenshots: capture on failure (or all in CI for debugging)
-    screenshot: process.env.CI ? 'on' : 'only-on-failure',
+    // Screenshots: always capture all screenshots for validation
+    screenshot: 'on',
 
     // Video: only retain on failure to save space
     video: process.env.CI ? 'retain-on-failure' : 'on-first-retry',

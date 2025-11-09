@@ -47,7 +47,9 @@ npx playwright test --reporter=html,list
 echo ""
 echo "📸 Collecting screenshots..."
 
-# Find and copy all screenshots
+# Find and copy all screenshots from test results
+find tests/e2e/test-results -name "*.png" -exec cp {} e2e-screenshots/ \; 2>/dev/null || true
+find tests/e2e/playwright-report -name "*.png" -exec cp {} e2e-screenshots/ \; 2>/dev/null || true
 find test-results -name "*.png" -exec cp {} e2e-screenshots/ \; 2>/dev/null || true
 find playwright-report -name "*.png" -exec cp {} e2e-screenshots/ \; 2>/dev/null || true
 
@@ -65,10 +67,15 @@ if [ "$SCREENSHOT_COUNT" -gt 0 ]; then
   echo "Creating screenshot archive..."
   zip -r e2e-screenshots.zip e2e-screenshots/
   echo "✅ Archive created: e2e-screenshots.zip"
-else
-  echo "⚠️  No screenshots were captured"
-fi
 
-echo ""
-echo "✅ E2E tests complete!"
-echo "📖 View the HTML report: npx playwright show-report"
+  echo ""
+  echo "✅ E2E tests complete!"
+  echo "📖 View the HTML report: npx playwright show-report"
+else
+  echo ""
+  echo "❌ FAILURE: No screenshots were captured during E2E tests"
+  echo "   Screenshots are required to verify browser-based testing"
+  echo "   Check playwright.config.ts screenshot configuration"
+  echo ""
+  exit 1
+fi

@@ -70,9 +70,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setUser(null)
               })
           }
+        } else {
+          // Keycloak not authenticated - check for E2E test token in localStorage
+          const existingToken = localStorage.getItem('auth_token')
+          if (existingToken) {
+            console.log('Found existing auth token in localStorage, attempting to authenticate for E2E testing')
+            apiClient.setToken(existingToken)
+
+            try {
+              const userData = await apiClient.getMe()
+              setUser(userData)
+              setIsAuthenticated(true)
+              console.log('Successfully authenticated with localStorage token (E2E mode)')
+            } catch (error) {
+              console.error('Failed to authenticate with localStorage token:', error)
+              // Clear invalid token
+              localStorage.removeItem('auth_token')
+              apiClient.setToken(null)
+            }
+          }
         }
       } catch (error) {
         console.error('Keycloak initialization failed:', error)
+
+        // Fallback: try localStorage token for E2E testing
+        const existingToken = localStorage.getItem('auth_token')
+        if (existingToken) {
+          console.log('Keycloak failed, attempting localStorage token for E2E testing')
+          apiClient.setToken(existingToken)
+
+          try {
+            const userData = await apiClient.getMe()
+            setUser(userData)
+            setIsAuthenticated(true)
+            console.log('Successfully authenticated with localStorage token (E2E mode)')
+          } catch (error) {
+            console.error('Failed to authenticate with localStorage token:', error)
+            localStorage.removeItem('auth_token')
+            apiClient.setToken(null)
+          }
+        }
       } finally {
         setIsLoading(false)
       }

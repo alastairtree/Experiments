@@ -200,6 +200,24 @@ jobs:
           BACKEND_PORT: 8001
         run: npx playwright test
 
+      - name: Validate screenshot capture
+        if: always()
+        working-directory: ./paneldash
+        run: |
+          echo "🔍 Validating screenshot capture..."
+          SCREENSHOT_COUNT=$(find tests/e2e/test-results -name "*.png" 2>/dev/null | wc -l)
+          echo "📊 Found $SCREENSHOT_COUNT screenshots"
+
+          if [ "$SCREENSHOT_COUNT" -eq 0 ]; then
+            echo "❌ FAILURE: No screenshots were captured during E2E tests"
+            echo "   Screenshots are required to verify browser-based testing"
+            echo "   Check playwright.config.ts screenshot configuration"
+            exit 1
+          else
+            echo "✅ Screenshot validation passed: $SCREENSHOT_COUNT screenshots captured"
+            ls -lh tests/e2e/test-results/**/*.png 2>/dev/null | head -10 || true
+          fi
+
       - name: Upload Playwright HTML report
         if: always()
         uses: actions/upload-artifact@v4
