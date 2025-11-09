@@ -1,6 +1,5 @@
 """Shared test configuration and fixtures."""
 
-from pathlib import Path
 import pytest
 
 from pytest_keycloak import ClientConfig, KeycloakConfig, RealmConfig, UserConfig

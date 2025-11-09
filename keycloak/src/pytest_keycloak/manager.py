@@ -261,7 +261,9 @@ class KeycloakManager:
                 # Auto-select ports starting from default
                 http_port, mgmt_port = self._find_available_ports(start_port=self.port)
                 if http_port != self.port or mgmt_port != self.management_port:
-                    logger.info(f"🔍 Auto-selected available ports: {http_port} (HTTP), {mgmt_port} (management)")
+                    logger.info(
+                        f"🔍 Auto-selected available ports: {http_port} (HTTP), {mgmt_port} (management)"
+                    )
                     self.port = http_port
                     self.management_port = mgmt_port
 
@@ -368,7 +370,9 @@ class KeycloakManager:
             except OSError:
                 return True
 
-    def _find_available_ports(self, start_port: int = 8080, max_attempts: int = 100) -> tuple[int, int]:
+    def _find_available_ports(
+        self, start_port: int = 8080, max_attempts: int = 100
+    ) -> tuple[int, int]:
         """
         Find a pair of available ports (HTTP and management).
 
@@ -390,7 +394,9 @@ class KeycloakManager:
 
             # Check if both ports are available
             if not self._is_port_in_use(http_port) and not self._is_port_in_use(mgmt_port):
-                logger.debug(f"Found available ports: {http_port} (HTTP) and {mgmt_port} (management)")
+                logger.debug(
+                    f"Found available ports: {http_port} (HTTP) and {mgmt_port} (management)"
+                )
                 return (http_port, mgmt_port)
 
         raise KeycloakStartError(

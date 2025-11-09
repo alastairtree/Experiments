@@ -36,7 +36,6 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            
         )
 
         # Download and install (should already be installed from fixture)
@@ -52,7 +51,6 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            
         )
 
         # First install (already done by fixture)
@@ -74,7 +72,6 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            
         )
 
         try:
@@ -88,7 +85,9 @@ class TestKeycloakManagerIntegration:
             assert manager.is_running()
 
             # Verify health endpoint on the management port
-            response = requests.get(f"http://localhost:{manager.management_port}/health/ready", timeout=10)
+            response = requests.get(
+                f"http://localhost:{manager.management_port}/health/ready", timeout=10
+            )
             assert response.status_code == 200
 
             # Verify admin console is accessible
@@ -105,7 +104,6 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            
         )
 
         realm_config = {
@@ -178,7 +176,6 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            
         )
 
         # Initially not running
@@ -204,7 +201,6 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            
         )
 
         manager.download_and_install()
@@ -229,7 +225,6 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            
         )
 
         try:
@@ -256,7 +251,6 @@ class TestKeycloakManagerIntegration:
         """Test that starting without installing raises error."""
         manager = KeycloakManager(
             install_dir=Path("/nonexistent/path/that/does/not/exist"),
-            
         )
 
         with pytest.raises(KeycloakStartError, match="not installed"):
@@ -267,7 +261,6 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            
         )
 
         manager.download_and_install()
@@ -286,7 +279,6 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            
         )
 
         manager.download_and_install()

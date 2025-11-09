@@ -15,7 +15,6 @@ def test_keycloak(shared_keycloak_install):
     manager = KeycloakManager(
         version="26.0.7",
         install_dir=shared_keycloak_install,
-        
         admin_user="admin",
         admin_password="admin",
     )
