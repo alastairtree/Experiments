@@ -36,7 +36,18 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        // Browser launch options for better stability in CI
+        launchOptions: {
+          args: [
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+          ],
+        },
+      },
     },
   ],
 
