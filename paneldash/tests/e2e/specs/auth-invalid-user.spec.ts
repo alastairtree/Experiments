@@ -16,10 +16,17 @@ import { test, expect } from '@playwright/test'
 test.describe('Invalid User Authentication - Browser Tests', () => {
   test('unauthenticated user cannot access dashboard', async ({ page }) => {
     // Navigate to dashboard WITHOUT authentication
-    await page.goto('/dashboard')
+    await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
+
+    // Wait a moment for redirect
+    await page.waitForTimeout(2000)
+
+    // Take screenshot for debugging
+    await page.screenshot({ path: 'tests/e2e/test-results/unauth-dashboard-attempt.png', fullPage: true })
 
     // Should be redirected to login page
-    await page.waitForURL('/login', { timeout: 5000 })
+    const currentUrl = page.url()
+    expect(currentUrl).toContain('/login')
 
     // Verify login page is displayed
     const loginButton = page.getByRole('button', { name: /sign in/i })

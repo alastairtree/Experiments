@@ -68,3 +68,29 @@ export async function clearPageAuthentication(page: Page): Promise<void> {
 export async function getPageAuthToken(page: Page): Promise<string | null> {
   return await page.evaluate(() => localStorage.getItem('auth_token'))
 }
+
+/**
+ * Wait for authentication to complete after page load
+ *
+ * This checks if the app has finished loading and authentication is complete
+ * by waiting for the loading spinner to disappear
+ *
+ * @param page - Playwright page instance
+ * @param timeout - Maximum time to wait in milliseconds (default: 10000)
+ */
+export async function waitForAuthComplete(page: Page, timeout: number = 10000): Promise<void> {
+  try {
+    // Wait for either successful auth or redirect to login
+    await Promise.race([
+      // Wait for loading to finish (loading indicator should disappear)
+      page.waitForSelector('text=/Loading/i', { state: 'hidden', timeout }),
+      // Or wait for login page (means auth failed)
+      page.waitForURL('**/login', { timeout }),
+      // Or wait for successful page load
+      page.waitForLoadState('networkidle', { timeout: Math.min(timeout, 5000) })
+    ])
+  } catch (error) {
+    console.warn('Auth wait timed out or failed:', error)
+    // Don't throw - let the test continue and fail on its own assertions
+  }
+}

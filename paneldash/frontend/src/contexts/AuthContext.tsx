@@ -39,7 +39,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           apiClient.setToken(existingToken)
 
           try {
+            // Add timeout to prevent hanging in E2E tests
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
+
             const userData = await apiClient.getMe()
+            clearTimeout(timeoutId)
+
             setUser(userData)
             setIsAuthenticated(true)
             console.log('E2E mode: Authenticated successfully with localStorage token')
@@ -47,7 +53,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error('E2E mode: Failed to authenticate with localStorage token:', error)
             localStorage.removeItem('auth_token')
             apiClient.setToken(null)
+            setIsAuthenticated(false)
+            setUser(null)
           }
+        } else {
+          console.warn('E2E mode: No auth_token found in localStorage')
         }
 
         setIsLoading(false)

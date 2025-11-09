@@ -13,7 +13,7 @@
 
 import { test, expect, request as playwrightRequest } from '@playwright/test'
 import { generateJWTToken, TEST_USERS } from '../fixtures/jwt-helper'
-import { authenticatePageWithToken } from '../fixtures/browser-auth-helper'
+import { authenticatePageWithToken, waitForAuthComplete } from '../fixtures/browser-auth-helper'
 
 const API_URL = process.env.VITE_API_URL || 'http://localhost:8001'
 
@@ -82,14 +82,30 @@ test.describe('Valid User Authentication - Browser Tests', () => {
     await authenticatePageWithToken(page, TEST_USERS.validUser)
 
     // Navigate to dashboard
-    await page.goto('/dashboard')
+    await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
 
-    // Wait for the dashboard to load - verify we're not redirected to login
-    await page.waitForURL('/dashboard', { timeout: 5000 })
+    // Wait for authentication to complete
+    await waitForAuthComplete(page)
+
+    // Take a screenshot to verify we're rendering
+    await page.screenshot({ path: 'tests/e2e/test-results/debug-dashboard-load.png', fullPage: true })
+
+    // Check current URL - should be on dashboard, not redirected to login
+    const currentUrl = page.url()
+    console.log('Current URL after navigation:', currentUrl)
+
+    // If we're on login, auth failed - take screenshot and fail with helpful message
+    if (currentUrl.includes('/login')) {
+      await page.screenshot({ path: 'tests/e2e/test-results/debug-failed-auth-on-login.png', fullPage: true })
+      throw new Error('Authentication failed: Redirected to /login page. Check that backend API is running and responding.')
+    }
+
+    // Verify we're on the dashboard
+    expect(currentUrl).toContain('/dashboard')
 
     // Verify dashboard page elements are visible
     const header = page.locator('header, nav')
-    await expect(header).toBeVisible()
+    await expect(header).toBeVisible({ timeout: 5000 })
 
     console.log('✓ Authenticated user can access dashboard')
   })
