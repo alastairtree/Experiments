@@ -28,6 +28,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initKeycloak = async () => {
+      // Check if we're in E2E testing mode (skip Keycloak, use localStorage token directly)
+      const e2eTesting = localStorage.getItem('e2e_testing') === 'true'
+
+      if (e2eTesting) {
+        console.log('E2E testing mode detected, skipping Keycloak initialization')
+        const existingToken = localStorage.getItem('auth_token')
+
+        if (existingToken) {
+          apiClient.setToken(existingToken)
+
+          try {
+            const userData = await apiClient.getMe()
+            setUser(userData)
+            setIsAuthenticated(true)
+            console.log('E2E mode: Authenticated successfully with localStorage token')
+          } catch (error) {
+            console.error('E2E mode: Failed to authenticate with localStorage token:', error)
+            localStorage.removeItem('auth_token')
+            apiClient.setToken(null)
+          }
+        }
+
+        setIsLoading(false)
+        return
+      }
+
       const kc = new Keycloak(keycloakConfig)
 
       try {

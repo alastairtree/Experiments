@@ -25,6 +25,8 @@ interface UserInfo {
  * This allows tests to bypass the Keycloak login flow and directly
  * navigate to protected pages.
  *
+ * IMPORTANT: Call this BEFORE navigating to any page
+ *
  * @param page - Playwright page instance
  * @param userInfo - User information to generate JWT token
  */
@@ -34,9 +36,10 @@ export async function authenticatePageWithToken(
 ): Promise<string> {
   const token = generateJWTToken(userInfo)
 
-  // Inject token into localStorage before navigation
+  // Inject token and E2E flag into localStorage before page loads
   await page.addInitScript((authToken) => {
     localStorage.setItem('auth_token', authToken)
+    localStorage.setItem('e2e_testing', 'true')
   }, token)
 
   return token
