@@ -173,9 +173,9 @@ class KeycloakClient:
             logger.info(f"Created user '{username}' with ID: {user_id}")
             return user_id
 
+        except KeycloakAPIError:
+            raise
         except requests.RequestException as e:
-            if isinstance(e, KeycloakAPIError):
-                raise
             raise KeycloakAPIError(
                 f"Failed to create user '{username}': {e}",
                 status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,
@@ -213,9 +213,9 @@ class KeycloakClient:
 
             return users[0]["id"]
 
+        except KeycloakAPIError:
+            raise
         except requests.RequestException as e:
-            if isinstance(e, KeycloakAPIError):
-                raise
             raise KeycloakAPIError(
                 f"Failed to get user ID for '{username}': {e}",
                 status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,
@@ -332,9 +332,9 @@ class KeycloakClient:
 
             logger.info(f"Created realm: {realm_config.get('realm')}")
 
+        except KeycloakAPIError:
+            raise
         except requests.RequestException as e:
-            if isinstance(e, KeycloakAPIError):
-                raise
             raise KeycloakAPIError(
                 f"Failed to create realm: {e}",
                 status_code=getattr(e.response, "status_code", None) if hasattr(e, "response") else None,

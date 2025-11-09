@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -195,6 +194,7 @@ class KeycloakManager:
         total_size = int(response.headers.get("content-length", 0))
         block_size = 8192
         downloaded = 0
+        last_logged_percent = 0
 
         with open(dest, "wb") as f:
             for chunk in response.iter_content(chunk_size=block_size):
@@ -203,7 +203,10 @@ class KeycloakManager:
                     downloaded += len(chunk)
                     if total_size > 0:
                         percent = (downloaded / total_size) * 100
-                        logger.info(f"Download progress: {percent:.1f}%")
+                        # Log only at 5% intervals to avoid excessive logging
+                        if percent >= last_logged_percent + 5 or percent >= 100:
+                            logger.info(f"Download progress: {percent:.1f}%")
+                            last_logged_percent = int(percent / 5) * 5
 
     def start(
         self,
@@ -394,6 +397,7 @@ class KeycloakManager:
                     logger.info("Keycloak is ready")
                     return
             except requests.RequestException:
+                # Connection errors are expected during startup; ignore and retry
                 pass
 
             # Check if process is still running
