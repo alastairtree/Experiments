@@ -43,7 +43,7 @@ class KeycloakManager:
         self,
         version: str = "26.0.7",
         install_dir: Optional[Path] = None,
-        port: int = 8080,
+        port: Optional[int] = None,
         admin_user: str = "admin",
         admin_password: str = "admin",
         management_port: Optional[int] = None,
@@ -54,17 +54,18 @@ class KeycloakManager:
         Args:
             version: Keycloak version to download
             install_dir: Where to install Keycloak (default: ~/.keycloak-test)
-            port: HTTP port for Keycloak
+            port: HTTP port for Keycloak (default: auto-select from 8080+)
             admin_user: Admin username
             admin_password: Admin password
             management_port: Management/health port (default: port + 1000)
         """
         self.version = version
         self.install_dir = install_dir or Path.home() / ".keycloak-test"
-        self.port = port
+        self._explicit_port = port is not None or management_port is not None
+        self.port = port if port is not None else 8080
         self.admin_user = admin_user
         self.admin_password = admin_password
-        self.management_port = management_port if management_port is not None else port + 1000
+        self.management_port = management_port if management_port is not None else self.port + 1000
 
         self.keycloak_dir = self.install_dir / f"keycloak-{version}"
         self.process: Optional[subprocess.Popen[bytes]] = None
@@ -245,6 +246,23 @@ class KeycloakManager:
                     "Keycloak is not installed. Call download_and_install() first."
                 )
 
+            # Check if requested ports are available, find alternatives if needed
+            if self._explicit_port:
+                # User specified ports - try them first, but find alternatives if busy
+                if self._is_port_in_use(self.port) or self._is_port_in_use(self.management_port):
+                    logger.info(f"⚠️  Requested ports {self.port}/{self.management_port} in use, finding alternatives...")
+                    http_port, mgmt_port = self._find_available_ports(start_port=self.port)
+                    logger.info(f"🔍 Selected available ports: {http_port} (HTTP), {mgmt_port} (management)")
+                    self.port = http_port
+                    self.management_port = mgmt_port
+            else:
+                # Auto-select ports starting from default
+                http_port, mgmt_port = self._find_available_ports(start_port=self.port)
+                if http_port != self.port or mgmt_port != self.management_port:
+                    logger.info(f"🔍 Auto-selected available ports: {http_port} (HTTP), {mgmt_port} (management)")
+                    self.port = http_port
+                    self.management_port = mgmt_port
+
             # Prepare realm import if needed
             # Note: Import files must be in data/import, but we use custom DB path
             if realm_config:
@@ -365,6 +383,35 @@ class KeycloakManager:
             time.sleep(0.2)
 
         logger.warning(f"Ports {ports_to_check} still in use after {timeout}s")
+
+    def _find_available_ports(self, start_port: int = 8080, max_attempts: int = 100) -> tuple[int, int]:
+        """
+        Find a pair of available ports (HTTP and management).
+
+        Searches for a port P where both P and P+1000 are available.
+
+        Args:
+            start_port: Port to start searching from
+            max_attempts: Maximum number of ports to try
+
+        Returns:
+            Tuple of (http_port, management_port)
+
+        Raises:
+            KeycloakStartError: If no available port pair found
+        """
+        for port_offset in range(max_attempts):
+            http_port = start_port + port_offset
+            mgmt_port = http_port + 1000
+
+            # Check if both ports are available
+            if not self._is_port_in_use(http_port) and not self._is_port_in_use(mgmt_port):
+                logger.debug(f"Found available ports: {http_port} (HTTP) and {mgmt_port} (management)")
+                return (http_port, mgmt_port)
+
+        raise KeycloakStartError(
+            f"Could not find available port pair after {max_attempts} attempts starting from {start_port}"
+        )
 
     def stop(self, timeout: int = 10) -> None:
         """
