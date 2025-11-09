@@ -47,6 +47,7 @@ class KeycloakManager:
         admin_user: str = "admin",
         admin_password: str = "admin",
         management_port: Optional[int] = None,
+        data_dir: Optional[Path] = None,
     ):
         """
         Initialize KeycloakManager.
@@ -58,6 +59,7 @@ class KeycloakManager:
             admin_user: Admin username
             admin_password: Admin password
             management_port: Management/health port (default: port + 1000)
+            data_dir: Directory for instance data and logs (default: auto-generated timestamped directory)
         """
         self.version = version
         self.install_dir = install_dir or Path.home() / ".keycloak-test"
@@ -66,6 +68,13 @@ class KeycloakManager:
         self.admin_user = admin_user
         self.admin_password = admin_password
         self.management_port = management_port if management_port is not None else self.port + 1000
+
+        # Generate timestamped data directory if not provided
+        if data_dir is None:
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            self.data_dir = Path.cwd() / "keycloak-dev-server" / f"instance_{timestamp}"
+        else:
+            self.data_dir = Path(data_dir)
 
         self.keycloak_dir = self.install_dir / f"keycloak-{version}"
         self.process: Optional[subprocess.Popen[bytes]] = None
@@ -283,15 +292,18 @@ class KeycloakManager:
                 logger.info(f"📝 Configuring Keycloak with realm: {realm_name}")
                 logger.info(f"   Realm configuration written to {realm_file}")
 
-            # Prepare log file
-            log_dir = self.install_dir / "logs"
-            log_dir.mkdir(exist_ok=True)
-            self.log_file = log_dir / f"keycloak-{self.port}.log"
+            # Create data directory and prepare log file
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            self.log_file = self.data_dir / "keycloak.log"
 
             # Prepare environment
             env = os.environ.copy()
             env["KEYCLOAK_ADMIN"] = self.admin_user
             env["KEYCLOAK_ADMIN_PASSWORD"] = self.admin_password
+
+            # Note: We don't set a custom database URL because it causes Liquibase migration
+            # errors with H2. The default database location in the Keycloak installation dir
+            # is sufficient, as port isolation prevents conflicts between instances.
 
             # Determine script path
             if sys.platform == "win32":
@@ -342,7 +354,9 @@ class KeycloakManager:
                 # Wait for readiness
                 if wait_for_ready:
                     logger.info(f"   Waiting for Keycloak to be ready (timeout: {timeout}s)...")
-                    self.wait_for_ready(timeout=timeout)
+                    # Extract realm name if realm_config was provided
+                    realm_name = realm_config.get("realm") if realm_config else None
+                    self.wait_for_ready(timeout=timeout, realm_name=realm_name)
                     logger.info(f"✅ Keycloak server is ready on http://localhost:{self.port}")
 
             except Exception as e:
@@ -458,7 +472,7 @@ class KeycloakManager:
         # Check if process is still alive
         return self.process.poll() is None
 
-    def wait_for_ready(self, timeout: int = 60) -> None:
+    def wait_for_ready(self, timeout: int = 60, realm_name: Optional[str] = None) -> None:
         """
         Poll the health endpoint until ready.
 
@@ -470,6 +484,7 @@ class KeycloakManager:
 
         Args:
             timeout: Max seconds to wait
+            realm_name: Optional realm name to verify after health check passes
 
         Raises:
             KeycloakTimeoutError: If not ready within timeout
@@ -481,12 +496,13 @@ class KeycloakManager:
 
         logger.info(f"Waiting for Keycloak to be ready at {url}...")
 
+        # First wait for health endpoint
         while time.time() - start_time < timeout:
             try:
                 response = requests.get(url, timeout=5)
                 if response.status_code == 200:
                     logger.info("Keycloak is ready")
-                    return
+                    break
             except requests.RequestException:
                 # Connection errors are expected during startup; ignore and retry
                 pass
@@ -498,10 +514,36 @@ class KeycloakManager:
                 )
 
             time.sleep(interval)
+        else:
+            raise KeycloakTimeoutError(
+                f"Keycloak did not become ready within {timeout} seconds. Check logs at {self.log_file}"
+            )
 
-        raise KeycloakTimeoutError(
-            f"Keycloak did not become ready within {timeout} seconds. Check logs at {self.log_file}"
-        )
+        # If a realm was imported, verify it's accessible
+        if realm_name:
+            logger.info(f"Verifying realm '{realm_name}' is accessible...")
+            realm_url = f"{self.get_base_url()}/realms/{realm_name}"
+
+            while time.time() - start_time < timeout:
+                try:
+                    response = requests.get(realm_url, timeout=5)
+                    if response.status_code == 200:
+                        logger.info(f"Realm '{realm_name}' is accessible")
+                        return
+                except requests.RequestException:
+                    pass
+
+                # Check if process is still running
+                if not self.is_running():
+                    raise KeycloakTimeoutError(
+                        f"Keycloak process terminated. Check logs at {self.log_file}"
+                    )
+
+                time.sleep(interval)
+
+            raise KeycloakTimeoutError(
+                f"Realm '{realm_name}' did not become accessible within {timeout} seconds. Check logs at {self.log_file}"
+            )
 
     def get_base_url(self) -> str:
         """
