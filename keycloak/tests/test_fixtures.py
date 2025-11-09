@@ -19,7 +19,7 @@ class TestPytestFixtures:
         assert keycloak_config.port == 8180
         assert keycloak_config.admin_user == "admin"
         assert keycloak_config.admin_password == "admin"
-        assert keycloak_config.auto_cleanup is True
+        assert keycloak_config.auto_cleanup is False  # Uses shared installation
 
     def test_keycloak_config_realm(self, keycloak_config):
         """Test that keycloak_config has proper realm configuration."""

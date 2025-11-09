@@ -31,15 +31,15 @@ class TestKeycloakManagerIntegration:
         except JavaNotFoundError as e:
             pytest.skip(f"Java 17+ not available: {e}")
 
-    def test_download_and_install(self, tmp_path):
+    def test_download_and_install(self, shared_keycloak_install):
         """Test downloading and installing Keycloak."""
         manager = KeycloakManager(
             version="26.0.7",
-            install_dir=tmp_path / "keycloak-test",
+            install_dir=shared_keycloak_install,
             port=8280,
         )
 
-        # Download and install
+        # Download and install (should already be installed from fixture)
         manager.download_and_install()
 
         # Verify installation
@@ -47,15 +47,15 @@ class TestKeycloakManagerIntegration:
         assert (manager.keycloak_dir / "bin" / "kc.sh").exists()
         assert (manager.keycloak_dir / "bin" / "kc.sh").stat().st_mode & 0o111  # Executable
 
-    def test_install_is_idempotent(self, tmp_path):
+    def test_install_is_idempotent(self, shared_keycloak_install):
         """Test that installing twice doesn't re-download."""
         manager = KeycloakManager(
             version="26.0.7",
-            install_dir=tmp_path / "keycloak-test-idempotent",
+            install_dir=shared_keycloak_install,
             port=8281,
         )
 
-        # First install
+        # First install (already done by fixture)
         manager.download_and_install()
         first_install_time = manager.keycloak_dir.stat().st_mtime
 
@@ -69,11 +69,11 @@ class TestKeycloakManagerIntegration:
         # Directory should not have been recreated
         assert first_install_time == second_install_time
 
-    def test_start_and_stop_keycloak(self, tmp_path):
+    def test_start_and_stop_keycloak(self, shared_keycloak_install):
         """Test starting and stopping Keycloak server."""
         manager = KeycloakManager(
             version="26.0.7",
-            install_dir=tmp_path / "keycloak-test-start",
+            install_dir=shared_keycloak_install,
             port=8282,
         )
 
@@ -100,11 +100,11 @@ class TestKeycloakManagerIntegration:
             manager.stop()
             assert not manager.is_running()
 
-    def test_start_with_realm_import(self, tmp_path):
+    def test_start_with_realm_import(self, shared_keycloak_install):
         """Test starting Keycloak with realm configuration."""
         manager = KeycloakManager(
             version="26.0.7",
-            install_dir=tmp_path / "keycloak-test-realm",
+            install_dir=shared_keycloak_install,
             port=8283,
         )
 
@@ -174,11 +174,11 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(port=9090)
         assert manager.get_base_url() == "http://localhost:9090"
 
-    def test_is_running_states(self, tmp_path):
+    def test_is_running_states(self, shared_keycloak_install):
         """Test is_running returns correct states."""
         manager = KeycloakManager(
             version="26.0.7",
-            install_dir=tmp_path / "keycloak-test-running",
+            install_dir=shared_keycloak_install,
             port=8285,
         )
 
@@ -200,11 +200,11 @@ class TestKeycloakManagerIntegration:
             # Should not be running
             assert not manager.is_running()
 
-    def test_wait_for_ready_timeout(self, tmp_path):
+    def test_wait_for_ready_timeout(self, shared_keycloak_install):
         """Test that wait_for_ready times out appropriately."""
         manager = KeycloakManager(
             version="26.0.7",
-            install_dir=tmp_path / "keycloak-test-timeout",
+            install_dir=shared_keycloak_install,
             port=8286,
         )
 
@@ -225,11 +225,11 @@ class TestKeycloakManagerIntegration:
         finally:
             manager.stop()
 
-    def test_start_already_running(self, tmp_path):
+    def test_start_already_running(self, shared_keycloak_install):
         """Test starting when already running."""
         manager = KeycloakManager(
             version="26.0.7",
-            install_dir=tmp_path / "keycloak-test-already-running",
+            install_dir=shared_keycloak_install,
             port=8287,
         )
 
@@ -263,11 +263,11 @@ class TestKeycloakManagerIntegration:
         with pytest.raises(KeycloakStartError, match="not installed"):
             manager.start()
 
-    def test_cleanup(self, tmp_path):
+    def test_cleanup(self, shared_keycloak_install):
         """Test cleanup stops the server."""
         manager = KeycloakManager(
             version="26.0.7",
-            install_dir=tmp_path / "keycloak-test-cleanup",
+            install_dir=shared_keycloak_install,
             port=8290,
         )
 
@@ -282,11 +282,11 @@ class TestKeycloakManagerIntegration:
         # Should be stopped
         assert not manager.is_running()
 
-    def test_manager_context_lifecycle(self, tmp_path):
+    def test_manager_context_lifecycle(self, shared_keycloak_install):
         """Test full lifecycle with multiple start/stop cycles."""
         manager = KeycloakManager(
             version="26.0.7",
-            install_dir=tmp_path / "keycloak-test-lifecycle",
+            install_dir=shared_keycloak_install,
             port=8291,
         )
 

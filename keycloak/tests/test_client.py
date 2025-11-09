@@ -10,19 +10,17 @@ from pytest_keycloak.manager import KeycloakManager
 
 
 @pytest.fixture(scope="module")
-def test_keycloak(tmp_path_factory):
+def test_keycloak(shared_keycloak_install):
     """Module-scoped Keycloak instance for client tests."""
-    tmp_path = tmp_path_factory.mktemp("keycloak-client-tests")
-    print(f"Using temporary path for Keycloak: {tmp_path}")
     manager = KeycloakManager(
         version="26.0.7",
-        install_dir=tmp_path / "keycloak",
+        install_dir=shared_keycloak_install,
         port=8380,
         admin_user="admin",
         admin_password="admin",
     )
 
-    # Install and start
+    # Install (already done by shared fixture) and start
     manager.download_and_install()
     manager.start(wait_for_ready=True, timeout=120)
 

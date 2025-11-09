@@ -1,20 +1,47 @@
 """Shared test configuration and fixtures."""
 
+from pathlib import Path
 import pytest
 
 from pytest_keycloak import ClientConfig, KeycloakConfig, RealmConfig, UserConfig
+from pytest_keycloak.manager import KeycloakManager
 
 
 @pytest.fixture(scope="session")
-def keycloak_config():
+def shared_keycloak_install(tmp_path_factory):
+    """
+    Session-scoped shared Keycloak installation directory.
+
+    This prevents re-downloading Keycloak for every test by providing
+    a single shared installation that all tests can use.
+    """
+    install_dir = tmp_path_factory.mktemp("shared-keycloak-install")
+    manager = KeycloakManager(
+        version="26.0.7",
+        install_dir=install_dir,
+        port=8999,  # Dummy port, won't be used
+    )
+
+    # Download and install once for the entire test session
+    manager.download_and_install()
+
+    yield install_dir
+
+    # No cleanup needed - tmp_path_factory handles it
+
+
+@pytest.fixture(scope="session")
+def keycloak_config(shared_keycloak_install):
     """
     Keycloak configuration for integration tests.
 
     Uses port 8180 to avoid conflicts with potential running Keycloak instances.
+    Uses shared installation directory to avoid re-downloading.
     """
     return KeycloakConfig(
         port=8180,
         version="26.0.7",
+        install_dir=shared_keycloak_install,
         realm=RealmConfig(
             realm="test-realm",
             enabled=True,
@@ -46,7 +73,7 @@ def keycloak_config():
                 )
             ],
         ),
-        auto_cleanup=True,
+        auto_cleanup=False,  # Don't delete shared installation
     )
 
 
@@ -59,15 +86,15 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "integration: marks tests as integration tests")
 
 
-def pytest_runtest_teardown(item, nextitem):
-    """Ensure complete cleanup between tests to avoid port conflicts."""
+def pytest_sessionfinish(session, exitstatus):
+    """Clean up at the end of the test session."""
     import subprocess
     import time
 
-    # Kill any lingering Java/Keycloak processes to prevent port conflicts
+    # Only kill lingering processes at the END of the entire test session
+    # Not between individual tests (which defeats session-scoped fixtures)
     try:
         subprocess.run(["pkill", "-9", "-f", "keycloak"], capture_output=True, timeout=5)
-        # Small delay to ensure ports are released
         time.sleep(0.5)
     except Exception:
         pass  # Ignore errors if no processes to kill
