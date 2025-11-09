@@ -27,10 +27,24 @@ BUILD_SUCCESS=true
 
 # Parse command line arguments
 CLEAN_BUILD=false
-if [ "${1:-}" = "--clean" ]; then
-    CLEAN_BUILD=true
-    print_warning "Clean build requested - will recreate virtual environment"
-fi
+SKIP_TESTS=false
+for arg in "$@"; do
+    case "$arg" in
+        --clean)
+            CLEAN_BUILD=true
+            print_warning "Clean build requested - will recreate virtual environment"
+            ;;
+        --skip-tests)
+            SKIP_TESTS=true
+            print_warning "Skipping tests"
+            ;;
+        *)
+            print_error "Unknown option: $arg"
+            echo "Usage: $0 [--clean] [--skip-tests]"
+            exit 1
+            ;;
+    esac
+done
 
 # Cleanup function
 cleanup_on_error() {
@@ -158,11 +172,15 @@ ruff format src/ tests/ || {
 }
 
 # Step 6: Run tests
-print_step "Running tests..."
-if ! pytest tests/ -v; then
-    print_error "Tests failed"
-    BUILD_SUCCESS=false
-    exit 1
+if [ "$SKIP_TESTS" = false ]; then
+    print_step "Running tests..."
+    if ! pytest tests/ -v; then
+        print_error "Tests failed"
+        BUILD_SUCCESS=false
+        exit 1
+    fi
+else
+    print_step "Skipping tests (--skip-tests flag provided)"
 fi
 
 # Step 7: Build wheel package

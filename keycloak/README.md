@@ -32,10 +32,6 @@ You should see Java 17 or higher. If not, install from:
 ## Installation
 
 ```bash
-# wiremock dependency on java
-sudo apt update -y && sudo apt install -y default-jdk
-
-# TODO: publish release
 pip install pytest-keycloak-fixture
 ```
 
@@ -139,10 +135,10 @@ Session-scoped fixture that provides Keycloak configuration. Override this in yo
 
 **Default Configuration:**
 - Version: 26.0.7
-- Port: 8080
+- Port: Auto-selected (starting from 8080)
 - Admin user: admin
 - Admin password: admin
-- Test realm with 2 users and 1 client
+- Test realm "test-realm" with 2 pre-configured users (testuser1, testuser2) and 1 client (test-client)
 
 ### `keycloak`
 
@@ -319,14 +315,18 @@ def test_multiple_realms(keycloak_client):
 
 ### Custom Port
 
+By default, ports are auto-selected starting from 8080. To specify an exact port:
+
 ```python
 @pytest.fixture(scope="session")
 def keycloak_config():
     return KeycloakConfig(
-        port=8081,  # Use different port
+        port=8081,  # Use specific port (will fail if unavailable)
         realm=RealmConfig(realm="test-realm")
     )
 ```
+
+**Note:** The default behavior auto-selects an available port, which is recommended for CI/CD environments where multiple test runs may occur simultaneously.
 
 ### Skip Auto-Cleanup
 
@@ -478,36 +478,72 @@ def keycloak_config():
 git clone https://github.com/yourusername/pytest-keycloak-fixture.git
 cd pytest-keycloak-fixture/keycloak
 
-# Install in development mode
+# Install in development mode (requires Java 17+)
 pip install -e '.[dev]'
 
-# Run tests
-pytest tests/
-
-# Format code
-black src/ tests/
-
-# Lint
-ruff check src/ tests/
-
-# Type check
-mypy src/
+# Or use the build script which handles everything
+./build.sh
 ```
+
+### Build Script
+
+The `build.sh` script automates the entire build process:
+
+```bash
+# Standard build (runs all checks and tests)
+./build.sh
+
+# Build without running tests (faster)
+./build.sh --skip-tests
+
+# Clean build (recreates virtual environment)
+./build.sh --clean
+
+# Combine options
+./build.sh --clean --skip-tests
+```
+
+The build script:
+- Checks for Java 17+ (installs if missing and sudo is available)
+- Creates/activates a Python virtual environment
+- Installs all dependencies
+- Runs ruff linting and formatting
+- Runs the full test suite (unless `--skip-tests` is used)
+- Builds the wheel package in `dist/`
 
 ### Running Tests
 
 ```bash
 # Run all tests
-pytest
+pytest tests/ -v
 
-# Run with coverage
-pytest --cov=pytest_keycloak --cov-report=html
+# Run tests with coverage
+pytest tests/ -v --cov=pytest_keycloak --cov-report=html
+
+# Lint and fix issues
+ruff check --fix src/ tests/
+
+# Format code
+ruff format src/ tests/
 
 # Run specific test file
 pytest tests/test_manager.py
+```
 
-# Run with verbose output
-pytest -v
+## CI/CD
+
+The project uses GitHub Actions for continuous integration and deployment:
+
+- **Testing**: Runs on Python 3.9, 3.10, 3.11, and 3.12
+- **Linting**: Automated ruff checks on all pull requests
+- **Coverage**: Reports uploaded to Codecov
+- **Publishing**: Automatically publishes to PyPI on version tags (e.g., `pytest-keycloak-v0.1.0`)
+- **Path Filtering**: CI only runs when files in the `keycloak/` directory change
+
+To publish a new version:
+```bash
+git tag pytest-keycloak-v0.1.1
+git push origin pytest-keycloak-v0.1.1
 ```
 
 ## Contributing
@@ -517,7 +553,7 @@ Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch
 3. Add tests for new functionality
-4. Ensure all tests pass
+4. Ensure all tests pass (`./build.sh`)
 5. Submit a pull request
 
 ## License
