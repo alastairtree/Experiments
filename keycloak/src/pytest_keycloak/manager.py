@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -279,17 +280,12 @@ class KeycloakManager:
                 cmd = [str(script)]
 
             # Add arguments
-            # Use port-specific database path to avoid file locking conflicts
-            db_dir = self.keycloak_dir / "data" / f"h2-{self.port}"
-            db_dir.mkdir(parents=True, exist_ok=True)
-            db_path = db_dir / "keycloakdb"
             cmd.extend(
                 [
                     "start-dev",
                     f"--http-port={self.port}",
                     f"--http-management-port={self.management_port}",
                     "--health-enabled=true",  # Enable health endpoints
-                    f"--db-url-database={db_path}",  # Unique database per instance
                 ]
             )
 
@@ -333,6 +329,43 @@ class KeycloakManager:
                     self.process = None
                 raise KeycloakStartError(f"Failed to start Keycloak: {e}")
 
+    def _is_port_in_use(self, port: int) -> bool:
+        """
+        Check if a port is currently in use.
+
+        Args:
+            port: Port number to check
+
+        Returns:
+            True if port is in use, False otherwise
+        """
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                # Set SO_REUSEADDR to allow binding even if port is in TIME_WAIT
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("localhost", port))
+                return False
+            except OSError:
+                return True
+
+    def _wait_for_ports_release(self, timeout: int = 10) -> None:
+        """
+        Wait for HTTP and management ports to be released.
+
+        Args:
+            timeout: Max seconds to wait for ports to be released
+        """
+        start_time = time.time()
+        ports_to_check = [self.port, self.management_port]
+
+        while time.time() - start_time < timeout:
+            if not any(self._is_port_in_use(p) for p in ports_to_check):
+                logger.debug(f"Ports {ports_to_check} released")
+                return
+            time.sleep(0.2)
+
+        logger.warning(f"Ports {ports_to_check} still in use after {timeout}s")
+
     def stop(self, timeout: int = 10) -> None:
         """
         Stop the Keycloak server gracefully.
@@ -341,7 +374,7 @@ class KeycloakManager:
         1. Send SIGTERM to the process
         2. Wait up to timeout seconds
         3. If still running, send SIGKILL
-        4. Clean up any lock files
+        4. Wait for ports to be released
 
         Args:
             timeout: Max seconds to wait for graceful shutdown
@@ -375,8 +408,8 @@ class KeycloakManager:
                 logger.error(f"Error stopping Keycloak: {e}")
             finally:
                 self.process = None
-                # Give the OS time to release ports
-                time.sleep(1)
+                # Wait for ports to be released before returning
+                self._wait_for_ports_release(timeout=5)
 
     def is_running(self) -> bool:
         """
