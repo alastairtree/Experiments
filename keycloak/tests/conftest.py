@@ -19,7 +19,6 @@ def shared_keycloak_install(tmp_path_factory):
     manager = KeycloakManager(
         version="26.0.7",
         install_dir=install_dir,
-        port=8999,  # Dummy port, won't be used
     )
 
     # Download and install once for the entire test session
@@ -35,11 +34,10 @@ def keycloak_config(shared_keycloak_install):
     """
     Keycloak configuration for integration tests.
 
-    Uses port 8180 to avoid conflicts with potential running Keycloak instances.
+    Uses automatic port selection to avoid conflicts.
     Uses shared installation directory to avoid re-downloading.
     """
     return KeycloakConfig(
-        port=8180,
         version="26.0.7",
         install_dir=shared_keycloak_install,
         realm=RealmConfig(

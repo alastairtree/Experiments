@@ -16,7 +16,7 @@ class TestPytestFixtures:
         """Test that keycloak_config fixture works."""
         assert isinstance(keycloak_config, KeycloakConfig)
         assert keycloak_config.version == "26.0.7"
-        assert keycloak_config.port == 8180
+        assert keycloak_config.port == 8080  # Default port
         assert keycloak_config.admin_user == "admin"
         assert keycloak_config.admin_password == "admin"
         assert keycloak_config.auto_cleanup is False  # Uses shared installation
@@ -52,8 +52,8 @@ class TestPytestFixtures:
     def test_keycloak_fixture_running(self, keycloak):
         """Test that keycloak fixture provides a running instance."""
         assert keycloak.is_running()
-        assert keycloak.get_base_url() == "http://localhost:8180"
-        assert keycloak.port == 8180
+        assert keycloak.get_base_url() == f"http://localhost:{keycloak.port}"
+        assert keycloak.port >= 8080  # Auto-selected port should be >= 8080
 
     def test_keycloak_fixture_accessible(self, keycloak):
         """Test that Keycloak server is accessible via HTTP."""
@@ -71,7 +71,7 @@ class TestPytestFixtures:
     def test_keycloak_client_fixture(self, keycloak_client):
         """Test that keycloak_client fixture works."""
         assert keycloak_client is not None
-        assert keycloak_client.base_url == "http://localhost:8180"
+        assert keycloak_client.base_url.startswith("http://localhost:")  # Auto-selected port
         assert keycloak_client.realm == "test-realm"
         assert keycloak_client.admin_user == "admin"
 

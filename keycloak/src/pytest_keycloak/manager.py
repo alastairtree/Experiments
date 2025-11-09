@@ -246,15 +246,17 @@ class KeycloakManager:
                     "Keycloak is not installed. Call download_and_install() first."
                 )
 
-            # Check if requested ports are available, find alternatives if needed
+            # Check if requested ports are available
             if self._explicit_port:
-                # User specified ports - try them first, but find alternatives if busy
-                if self._is_port_in_use(self.port) or self._is_port_in_use(self.management_port):
-                    logger.info(f"⚠️  Requested ports {self.port}/{self.management_port} in use, finding alternatives...")
-                    http_port, mgmt_port = self._find_available_ports(start_port=self.port)
-                    logger.info(f"🔍 Selected available ports: {http_port} (HTTP), {mgmt_port} (management)")
-                    self.port = http_port
-                    self.management_port = mgmt_port
+                # User specified explicit ports - fail fast if they're in use
+                if self._is_port_in_use(self.port):
+                    raise KeycloakStartError(
+                        f"Port {self.port} is already in use. Please choose a different port."
+                    )
+                if self._is_port_in_use(self.management_port):
+                    raise KeycloakStartError(
+                        f"Management port {self.management_port} is already in use. Please choose a different port."
+                    )
             else:
                 # Auto-select ports starting from default
                 http_port, mgmt_port = self._find_available_ports(start_port=self.port)
@@ -366,24 +368,6 @@ class KeycloakManager:
             except OSError:
                 return True
 
-    def _wait_for_ports_release(self, timeout: int = 10) -> None:
-        """
-        Wait for HTTP and management ports to be released.
-
-        Args:
-            timeout: Max seconds to wait for ports to be released
-        """
-        start_time = time.time()
-        ports_to_check = [self.port, self.management_port]
-
-        while time.time() - start_time < timeout:
-            if not any(self._is_port_in_use(p) for p in ports_to_check):
-                logger.debug(f"Ports {ports_to_check} released")
-                return
-            time.sleep(0.2)
-
-        logger.warning(f"Ports {ports_to_check} still in use after {timeout}s")
-
     def _find_available_ports(self, start_port: int = 8080, max_attempts: int = 100) -> tuple[int, int]:
         """
         Find a pair of available ports (HTTP and management).
@@ -421,7 +405,6 @@ class KeycloakManager:
         1. Send SIGTERM to the process
         2. Wait up to timeout seconds
         3. If still running, send SIGKILL
-        4. Wait for ports to be released
 
         Args:
             timeout: Max seconds to wait for graceful shutdown
@@ -455,8 +438,6 @@ class KeycloakManager:
                 logger.error(f"Error stopping Keycloak: {e}")
             finally:
                 self.process = None
-                # Wait for ports to be released before returning
-                self._wait_for_ports_release(timeout=5)
 
     def is_running(self) -> bool:
         """

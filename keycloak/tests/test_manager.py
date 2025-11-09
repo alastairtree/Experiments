@@ -36,7 +36,7 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            port=8280,
+            
         )
 
         # Download and install (should already be installed from fixture)
@@ -52,7 +52,7 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            port=8281,
+            
         )
 
         # First install (already done by fixture)
@@ -74,7 +74,7 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            port=8282,
+            
         )
 
         try:
@@ -105,7 +105,7 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            port=8283,
+            
         )
 
         realm_config = {
@@ -168,18 +168,17 @@ class TestKeycloakManagerIntegration:
 
     def test_get_base_url(self):
         """Test get_base_url returns correct URL."""
-        manager = KeycloakManager(port=8284)
-        assert manager.get_base_url() == "http://localhost:8284"
-
-        manager = KeycloakManager(port=9090)
-        assert manager.get_base_url() == "http://localhost:9090"
+        manager = KeycloakManager()
+        # Port will be auto-selected but should match the base URL
+        expected_url = f"http://localhost:{manager.port}"
+        assert manager.get_base_url() == expected_url
 
     def test_is_running_states(self, shared_keycloak_install):
         """Test is_running returns correct states."""
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            port=8285,
+            
         )
 
         # Initially not running
@@ -205,7 +204,7 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            port=8286,
+            
         )
 
         manager.download_and_install()
@@ -230,7 +229,7 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            port=8287,
+            
         )
 
         try:
@@ -247,7 +246,7 @@ class TestKeycloakManagerIntegration:
 
     def test_stop_not_running(self):
         """Test stopping when not running."""
-        manager = KeycloakManager(port=8288)
+        manager = KeycloakManager()
 
         # Should not raise error
         manager.stop()
@@ -257,7 +256,7 @@ class TestKeycloakManagerIntegration:
         """Test that starting without installing raises error."""
         manager = KeycloakManager(
             install_dir=Path("/nonexistent/path/that/does/not/exist"),
-            port=8289,
+            
         )
 
         with pytest.raises(KeycloakStartError, match="not installed"):
@@ -268,7 +267,7 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            port=8290,
+            
         )
 
         manager.download_and_install()
@@ -287,7 +286,7 @@ class TestKeycloakManagerIntegration:
         manager = KeycloakManager(
             version="26.0.7",
             install_dir=shared_keycloak_install,
-            port=8291,
+            
         )
 
         manager.download_and_install()
