@@ -59,8 +59,9 @@ class TestPytestFixtures:
         """Test that Keycloak server is accessible via HTTP."""
         import requests
 
-        # Check health endpoint (on management port 9000 in Keycloak 26.x)
-        response = requests.get("http://localhost:9000/health/ready", timeout=10)
+        # Check health endpoint on the management port
+        management_port = keycloak.port + 1000
+        response = requests.get(f"http://localhost:{management_port}/health/ready", timeout=10)
         assert response.status_code == 200
 
         # Check main endpoint

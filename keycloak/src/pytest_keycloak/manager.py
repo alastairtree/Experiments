@@ -45,6 +45,7 @@ class KeycloakManager:
         port: int = 8080,
         admin_user: str = "admin",
         admin_password: str = "admin",
+        management_port: Optional[int] = None,
     ):
         """
         Initialize KeycloakManager.
@@ -55,12 +56,14 @@ class KeycloakManager:
             port: HTTP port for Keycloak
             admin_user: Admin username
             admin_password: Admin password
+            management_port: Management/health port (default: port + 1000)
         """
         self.version = version
         self.install_dir = install_dir or Path.home() / ".keycloak-test"
         self.port = port
         self.admin_user = admin_user
         self.admin_password = admin_password
+        self.management_port = management_port if management_port is not None else port + 1000
 
         self.keycloak_dir = self.install_dir / f"keycloak-{version}"
         self.process: Optional[subprocess.Popen[bytes]] = None
@@ -242,10 +245,13 @@ class KeycloakManager:
                 )
 
             # Prepare realm import if needed
+            # Note: Import files must be in data/import, but we use custom DB path
             if realm_config:
                 import_dir = self.keycloak_dir / "data" / "import"
                 import_dir.mkdir(parents=True, exist_ok=True)
-                realm_file = import_dir / "realm.json"
+
+                # Create a unique realm file per port to avoid conflicts
+                realm_file = import_dir / f"realm-{self.port}.json"
 
                 with open(realm_file, "w") as f:
                     json.dump(realm_config, f, indent=2)
@@ -273,11 +279,17 @@ class KeycloakManager:
                 cmd = [str(script)]
 
             # Add arguments
+            # Use port-specific database path to avoid file locking conflicts
+            db_dir = self.keycloak_dir / "data" / f"h2-{self.port}"
+            db_dir.mkdir(parents=True, exist_ok=True)
+            db_path = db_dir / "keycloakdb"
             cmd.extend(
                 [
                     "start-dev",
                     f"--http-port={self.port}",
-                    "--health-enabled=true",  # Enable health endpoints on HTTP port
+                    f"--http-management-port={self.management_port}",
+                    "--health-enabled=true",  # Enable health endpoints
+                    f"--db-url-database={db_path}",  # Unique database per instance
                 ]
             )
 
@@ -363,6 +375,8 @@ class KeycloakManager:
                 logger.error(f"Error stopping Keycloak: {e}")
             finally:
                 self.process = None
+                # Give the OS time to release ports
+                time.sleep(1)
 
     def is_running(self) -> bool:
         """
@@ -381,11 +395,11 @@ class KeycloakManager:
         """
         Poll the health endpoint until ready.
 
-        Poll: GET http://localhost:9000/health/ready
+        Poll: GET http://localhost:{management_port}/health/ready
         Should return 200 when ready.
 
         Note: In Keycloak 26.x, health endpoints are exposed on the management
-        port 9000 by default, not on the main HTTP port.
+        port, which is configurable via --http-management-port.
 
         Args:
             timeout: Max seconds to wait
@@ -393,9 +407,8 @@ class KeycloakManager:
         Raises:
             KeycloakTimeoutError: If not ready within timeout
         """
-        # Health endpoint is on management port 9000 in Keycloak 26.x
-        management_port = 9000
-        url = f"http://localhost:{management_port}/health/ready"
+        # Health endpoint is on the configured management port
+        url = f"http://localhost:{self.management_port}/health/ready"
         start_time = time.time()
         interval = 2
 
