@@ -72,17 +72,24 @@ class KeycloakManager:
                     logger.info(
                         f"Stopping existing Keycloak instance on port {instance.port} before creating new instance"
                     )
-                    instance.stop()
-                    # Wait for process to fully terminate
-                    max_wait = 10
-                    waited = 0
-                    while instance.is_running() and waited < max_wait:
-                        time.sleep(0.5)
-                        waited += 0.5
+                    # Use internal stop to avoid deadlock (we already hold the lock)
+                    instance._stop_internal(timeout=5)
+
+                    # Verify process terminated - force kill if needed
                     if instance.is_running():
                         logger.warning(
-                            f"Existing instance on port {instance.port} did not stop within {max_wait}s"
+                            f"Existing instance on port {instance.port} did not stop - forcing kill"
                         )
+                        if instance.process:
+                            try:
+                                instance.process.kill()
+                                instance.process.wait(timeout=5)
+                                instance.process = None
+                                logger.info(f"Force killed instance on port {instance.port}")
+                            except Exception as e:
+                                logger.error(
+                                    f"Failed to force kill instance on port {instance.port}: {e}"
+                                )
 
         self.version = version
         self.install_dir = install_dir or Path.home() / ".keycloak-test"
@@ -139,7 +146,8 @@ class KeycloakManager:
                 if instance.is_running():
                     logger.info(f"Stopping Keycloak instance on port {instance.port}")
                     try:
-                        instance.stop()
+                        # Use internal stop to avoid deadlock (we already hold the lock)
+                        instance._stop_internal(timeout=10)
                     except Exception as e:
                         logger.warning(f"Error stopping instance on port {instance.port}: {e}")
 
@@ -579,6 +587,61 @@ class KeycloakManager:
             f"Could not find available port pair after {max_attempts} attempts starting from {start_port}"
         )
 
+    def _stop_internal(self, timeout: int = 10) -> None:
+        """
+        Internal stop method without lock acquisition.
+
+        This is called when the lock is already held (e.g., from __init__).
+
+        Args:
+            timeout: Max seconds to wait for graceful shutdown
+        """
+        if not self.is_running():
+            logger.debug("Keycloak is not running, nothing to stop")
+            return
+
+        if self.process is None:
+            return
+
+        logger.info(f"🛑 Stopping Keycloak server (port {self.port})...")
+
+        try:
+            # Send SIGTERM
+            self.process.terminate()
+
+            # Wait for graceful shutdown
+            try:
+                self.process.wait(timeout=timeout)
+                logger.info("✅ Keycloak stopped gracefully")
+            except subprocess.TimeoutExpired:
+                # Force kill
+                logger.warning("⚠️  Keycloak did not stop gracefully, forcing kill")
+                self.process.kill()
+                self.process.wait()
+                logger.info("✅ Keycloak process killed")
+
+        except Exception as e:
+            logger.error(f"Error stopping Keycloak: {e}")
+        finally:
+            self.process = None
+
+            # Wait for output thread to finish
+            if self._output_thread and self._output_thread.is_alive():
+                self._output_thread.join(timeout=2)
+            self._output_thread = None
+
+            # Clean up realm config file if it exists
+            if self.realm_config_file and self.realm_config_file.exists():
+                try:
+                    self.realm_config_file.unlink()
+                    logger.debug(f"Cleaned up realm config file: {self.realm_config_file}")
+                    self.realm_config_file = None
+                except Exception as e:
+                    logger.warning(f"Failed to clean up realm config file: {e}")
+
+            # Restore data and conf directories to original state
+            self._restore_directories()
+
     def stop(self, timeout: int = 10) -> None:
         """
         Stop the Keycloak server gracefully.
@@ -592,51 +655,7 @@ class KeycloakManager:
             timeout: Max seconds to wait for graceful shutdown
         """
         with self._lock:
-            if not self.is_running():
-                logger.debug("Keycloak is not running, nothing to stop")
-                return
-
-            if self.process is None:
-                return
-
-            logger.info(f"🛑 Stopping Keycloak server (port {self.port})...")
-
-            try:
-                # Send SIGTERM
-                self.process.terminate()
-
-                # Wait for graceful shutdown
-                try:
-                    self.process.wait(timeout=timeout)
-                    logger.info("✅ Keycloak stopped gracefully")
-                except subprocess.TimeoutExpired:
-                    # Force kill
-                    logger.warning("⚠️  Keycloak did not stop gracefully, forcing kill")
-                    self.process.kill()
-                    self.process.wait()
-                    logger.info("✅ Keycloak process killed")
-
-            except Exception as e:
-                logger.error(f"Error stopping Keycloak: {e}")
-            finally:
-                self.process = None
-
-                # Wait for output thread to finish
-                if self._output_thread and self._output_thread.is_alive():
-                    self._output_thread.join(timeout=2)
-                self._output_thread = None
-
-                # Clean up realm config file if it exists
-                if self.realm_config_file and self.realm_config_file.exists():
-                    try:
-                        self.realm_config_file.unlink()
-                        logger.debug(f"Cleaned up realm config file: {self.realm_config_file}")
-                        self.realm_config_file = None
-                    except Exception as e:
-                        logger.warning(f"Failed to clean up realm config file: {e}")
-
-                # Restore data and conf directories to original state
-                self._restore_directories()
+            self._stop_internal(timeout=timeout)
 
     def is_running(self) -> bool:
         """
