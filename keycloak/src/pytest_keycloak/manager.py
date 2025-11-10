@@ -5,13 +5,14 @@ import json
 import logging
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
 import time
 import zipfile
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any, Dict, Optional
 
 import requests
@@ -80,6 +81,8 @@ class KeycloakManager:
         self.process: Optional[subprocess.Popen[bytes]] = None
         self.log_file: Optional[Path] = None
         self.realm_config_file: Optional[Path] = None  # Track realm config file for cleanup
+        self._output_thread: Optional[Thread] = None  # Thread for reading process output
+        self._backup_dir: Optional[Path] = None  # Backup directory for data/conf
 
         # Register cleanup on exit
         atexit.register(self._cleanup_on_exit)
@@ -91,6 +94,90 @@ class KeycloakManager:
                 self.stop()
             except Exception as e:
                 logger.warning(f"Error during cleanup: {e}")
+
+    def _read_output(self, pipe, prefix: str = "") -> None:
+        """
+        Read output from a subprocess pipe and log it.
+
+        Args:
+            pipe: The pipe to read from (stdout or stderr)
+            prefix: Optional prefix for log messages
+        """
+        try:
+            for line in iter(pipe.readline, b""):
+                if line:
+                    decoded = line.decode("utf-8", errors="replace").rstrip()
+                    if decoded:
+                        logger.info(f"{prefix}{decoded}")
+        except Exception as e:
+            logger.debug(f"Error reading output: {e}")
+        finally:
+            pipe.close()
+
+    def _backup_directories(self) -> None:
+        """
+        Backup the data/ and conf/ directories before starting Keycloak.
+
+        This ensures we can restore to a clean state after stopping.
+        """
+        timestamp = time.strftime("%Y%m%d_%H%M%S_%f")
+        self._backup_dir = self.data_dir / f"backup_{timestamp}"
+        self._backup_dir.mkdir(parents=True, exist_ok=True)
+
+        # Backup data directory if it exists
+        data_dir = self.keycloak_dir / "data"
+        if data_dir.exists():
+            backup_data = self._backup_dir / "data"
+            shutil.copytree(data_dir, backup_data)
+            logger.debug(f"Backed up data directory to {backup_data}")
+
+        # Backup conf directory if it exists
+        conf_dir = self.keycloak_dir / "conf"
+        if conf_dir.exists():
+            backup_conf = self._backup_dir / "conf"
+            shutil.copytree(conf_dir, backup_conf)
+            logger.debug(f"Backed up conf directory to {backup_conf}")
+
+    def _restore_directories(self) -> None:
+        """
+        Restore the data/ and conf/ directories from backup.
+
+        This cleans up any changes made during the server run.
+        """
+        if not self._backup_dir or not self._backup_dir.exists():
+            logger.debug("No backup directory to restore from")
+            return
+
+        try:
+            # Restore data directory
+            data_dir = self.keycloak_dir / "data"
+            backup_data = self._backup_dir / "data"
+            if backup_data.exists():
+                # Remove current data directory
+                if data_dir.exists():
+                    shutil.rmtree(data_dir)
+                # Restore from backup
+                shutil.copytree(backup_data, data_dir)
+                logger.debug("Restored data directory from backup")
+
+            # Restore conf directory
+            conf_dir = self.keycloak_dir / "conf"
+            backup_conf = self._backup_dir / "conf"
+            if backup_conf.exists():
+                # Remove current conf directory
+                if conf_dir.exists():
+                    shutil.rmtree(conf_dir)
+                # Restore from backup
+                shutil.copytree(backup_conf, conf_dir)
+                logger.debug("Restored conf directory from backup")
+
+            # Clean up backup directory
+            shutil.rmtree(self._backup_dir)
+            logger.debug("Cleaned up backup directory")
+            self._backup_dir = None
+
+        except Exception as e:
+            logger.warning(f"Failed to restore directories from backup: {e}")
 
     def check_java_version(self) -> bool:
         """
@@ -333,16 +420,27 @@ class KeycloakManager:
             logger.info(f"🚀 Starting Keycloak server on port {self.port}...")
             logger.info(f"   Command: {' '.join(cmd)}")
 
+            # Backup data and conf directories before starting
+            self._backup_directories()
+
             try:
-                # Start process
-                with open(self.log_file, "w") as log_f:
-                    self.process = subprocess.Popen(
-                        cmd,
-                        cwd=self.keycloak_dir,
-                        env=env,
-                        stdout=log_f,
-                        stderr=subprocess.STDOUT,
-                    )
+                # Start process with piped output so we can log it
+                self.process = subprocess.Popen(
+                    cmd,
+                    cwd=self.keycloak_dir,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=1,  # Line buffered
+                )
+
+                # Start thread to read and log output
+                self._output_thread = Thread(
+                    target=self._read_output,
+                    args=(self.process.stdout, "[Keycloak] "),
+                    daemon=True,
+                )
+                self._output_thread.start()
 
                 # Wait a bit for the process to start
                 time.sleep(2)
@@ -464,6 +562,11 @@ class KeycloakManager:
             finally:
                 self.process = None
 
+                # Wait for output thread to finish
+                if self._output_thread and self._output_thread.is_alive():
+                    self._output_thread.join(timeout=2)
+                self._output_thread = None
+
                 # Clean up realm config file if it exists
                 if self.realm_config_file and self.realm_config_file.exists():
                     try:
@@ -472,6 +575,9 @@ class KeycloakManager:
                         self.realm_config_file = None
                     except Exception as e:
                         logger.warning(f"Failed to clean up realm config file: {e}")
+
+                # Restore data and conf directories to original state
+                self._restore_directories()
 
     def is_running(self) -> bool:
         """
