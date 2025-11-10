@@ -226,7 +226,10 @@ class TestKeycloakManagerIntegration:
                 )
                 # Manually set process to a terminated state
                 import subprocess
-                new_manager.process = subprocess.Popen(["sleep", "0"])  # Process that exits immediately
+
+                new_manager.process = subprocess.Popen(
+                    ["sleep", "0"]
+                )  # Process that exits immediately
                 new_manager.process.wait()
                 new_manager.wait_for_ready(timeout=5)
 

@@ -327,6 +327,7 @@ class KeycloakManager:
                 cmd.append("--import-realm")
 
             logger.info(f"🚀 Starting Keycloak server on port {self.port}...")
+            logger.info(f"   Command: {' '.join(cmd)}")
 
             try:
                 # Start process
