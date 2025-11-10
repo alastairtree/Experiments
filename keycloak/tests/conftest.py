@@ -81,17 +81,3 @@ def pytest_configure(config):
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
     config.addinivalue_line("markers", "integration: marks tests as integration tests")
-
-
-def pytest_sessionfinish(session, exitstatus):
-    """Clean up at the end of the test session."""
-    import subprocess
-    import time
-
-    # Only kill lingering processes at the END of the entire test session
-    # Not between individual tests (which defeats session-scoped fixtures)
-    try:
-        subprocess.run(["pkill", "-9", "-f", "keycloak"], capture_output=True, timeout=5)
-        time.sleep(0.5)
-    except Exception:
-        pass  # Ignore errors if no processes to kill

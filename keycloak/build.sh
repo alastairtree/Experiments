@@ -174,7 +174,7 @@ ruff format src/ tests/ || {
 # Step 6: Run tests
 if [ "$SKIP_TESTS" = false ]; then
     print_step "Running tests..."
-    if ! pytest tests/ -v; then
+    if ! pytest tests/ -vra --cov=pytest_keycloak --cov-report=xml --cov-report=term; then
         print_error "Tests failed"
         BUILD_SUCCESS=false
         exit 1
