@@ -62,7 +62,7 @@ class KeycloakClient:
         }
 
         try:
-            response = requests.post(url, data=data, timeout=30)
+            response = self._make_request("POST", url, data=data, timeout=30)
             response.raise_for_status()
 
             token_data = response.json()
@@ -91,6 +91,57 @@ class KeycloakClient:
             "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
         }
+
+    def _make_request(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> requests.Response:
+        """
+        Make an HTTP request with logging.
+
+        Logs the request method, URL, and response status.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE, etc.)
+            url: Request URL
+            **kwargs: Additional arguments to pass to requests
+
+        Returns:
+            Response object
+        """
+        # Log request
+        log_data = kwargs.get("data")
+        log_json = kwargs.get("json")
+
+        # Mask sensitive data in logs
+        if log_data and isinstance(log_data, dict) and "password" in log_data:
+            log_data = {**log_data, "password": "***"}
+        if log_json and isinstance(log_json, dict):
+            if "password" in log_json:
+                log_json = {**log_json, "password": "***"}
+            if "value" in log_json and url.endswith("/reset-password"):
+                log_json = {**log_json, "value": "***"}
+
+        logger.info(f"API Request: {method} {url}")
+        if log_data:
+            logger.debug(f"  Request data: {log_data}")
+        if log_json:
+            logger.debug(f"  Request JSON: {log_json}")
+
+        # Make request
+        response = requests.request(method, url, **kwargs)
+
+        # Log response
+        logger.info(f"API Response: {response.status_code} {response.reason}")
+        if response.content:
+            try:
+                logger.debug(f"  Response body: {response.json()}")
+            except Exception:
+                logger.debug(f"  Response body: {response.text[:200]}")
+
+        return response
 
     def create_user(
         self,
@@ -139,7 +190,8 @@ class KeycloakClient:
         }
 
         try:
-            response = requests.post(
+            response = self._make_request(
+                "POST",
                 url,
                 json=user_data,
                 headers=self._get_headers(),
@@ -174,8 +226,12 @@ class KeycloakClient:
                 "temporary": False,
             }
             try:
-                pwd_resp = requests.put(
-                    password_url, json=password_data, headers=self._get_headers(), timeout=30
+                pwd_resp = self._make_request(
+                    "PUT",
+                    password_url,
+                    json=password_data,
+                    headers=self._get_headers(),
+                    timeout=30,
                 )
                 pwd_resp.raise_for_status()
                 logger.info(f"Set password for user {user_id}")
@@ -225,7 +281,8 @@ class KeycloakClient:
 
         try:
             # Get all roles
-            response = requests.get(
+            response = self._make_request(
+                "GET",
                 url,
                 headers=self._get_headers(),
                 timeout=30,
@@ -241,7 +298,8 @@ class KeycloakClient:
                 assign_url = (
                     f"{self.base_url}/admin/realms/{realm}/users/{user_id}/role-mappings/realm"
                 )
-                response = requests.post(
+                response = self._make_request(
+                    "POST",
                     assign_url,
                     json=[user_role],
                     headers=self._get_headers(),
@@ -258,7 +316,8 @@ class KeycloakClient:
                     assign_url = (
                         f"{self.base_url}/admin/realms/{realm}/users/{user_id}/role-mappings/realm"
                     )
-                    response = requests.post(
+                    response = self._make_request(
+                        "POST",
                         assign_url,
                         json=[default_role],
                         headers=self._get_headers(),
@@ -291,7 +350,8 @@ class KeycloakClient:
         params = {"username": username, "exact": "true"}
 
         try:
-            response = requests.get(
+            response = self._make_request(
+                "GET",
                 url,
                 params=params,
                 headers=self._get_headers(),
@@ -332,7 +392,8 @@ class KeycloakClient:
         url = f"{self.base_url}/admin/realms/{target_realm}/users/{user_id}"
 
         try:
-            response = requests.delete(
+            response = self._make_request(
+                "DELETE",
                 url,
                 headers=self._get_headers(),
                 timeout=30,
@@ -384,7 +445,7 @@ class KeycloakClient:
         }
 
         try:
-            response = requests.post(url, data=data, timeout=30)
+            response = self._make_request("POST", url, data=data, timeout=30)
             response.raise_for_status()
 
             return response.json()
@@ -420,7 +481,8 @@ class KeycloakClient:
         url = f"{self.base_url}/admin/realms"
 
         try:
-            response = requests.post(
+            response = self._make_request(
+                "POST",
                 url,
                 json=realm_config,
                 headers=self._get_headers(),
@@ -463,7 +525,8 @@ class KeycloakClient:
         url = f"{self.base_url}/admin/realms/{realm}"
 
         try:
-            response = requests.delete(
+            response = self._make_request(
+                "DELETE",
                 url,
                 headers=self._get_headers(),
                 timeout=30,

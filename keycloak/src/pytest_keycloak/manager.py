@@ -79,6 +79,7 @@ class KeycloakManager:
         self.keycloak_dir = self.install_dir / f"keycloak-{version}"
         self.process: Optional[subprocess.Popen[bytes]] = None
         self.log_file: Optional[Path] = None
+        self.realm_config_file: Optional[Path] = None  # Track realm config file for cleanup
 
         # Register cleanup on exit
         atexit.register(self._cleanup_on_exit)
@@ -288,6 +289,9 @@ class KeycloakManager:
                 with open(realm_file, "w") as f:
                     json.dump(realm_config, f, indent=2)
 
+                # Track the realm config file for cleanup
+                self.realm_config_file = realm_file
+
                 realm_name = realm_config.get("realm", "unknown")
                 logger.info(f"📝 Configuring Keycloak with realm: {realm_name}")
                 logger.info(f"   Realm configuration written to {realm_file}")
@@ -459,6 +463,15 @@ class KeycloakManager:
                 logger.error(f"Error stopping Keycloak: {e}")
             finally:
                 self.process = None
+
+                # Clean up realm config file if it exists
+                if self.realm_config_file and self.realm_config_file.exists():
+                    try:
+                        self.realm_config_file.unlink()
+                        logger.debug(f"Cleaned up realm config file: {self.realm_config_file}")
+                        self.realm_config_file = None
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up realm config file: {e}")
 
     def is_running(self) -> bool:
         """
