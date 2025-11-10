@@ -39,6 +39,7 @@ class KeycloakManager:
     """
 
     _lock = Lock()
+    _instances: list["KeycloakManager"] = []  # Track all instances globally
 
     def __init__(
         self,
@@ -53,6 +54,8 @@ class KeycloakManager:
         """
         Initialize KeycloakManager.
 
+        Before creating a new instance, any existing running instances will be stopped.
+
         Args:
             version: Keycloak version to download
             install_dir: Where to install Keycloak (default: ~/.keycloak-test)
@@ -62,6 +65,25 @@ class KeycloakManager:
             management_port: Management/health port (default: port + 1000)
             data_dir: Directory for instance data and logs (default: auto-generated timestamped directory)
         """
+        # Stop any existing running instances before creating a new one
+        with self._lock:
+            for instance in self._instances[:]:  # Use a copy to avoid modification during iteration
+                if instance.is_running():
+                    logger.info(
+                        f"Stopping existing Keycloak instance on port {instance.port} before creating new instance"
+                    )
+                    instance.stop()
+                    # Wait for process to fully terminate
+                    max_wait = 10
+                    waited = 0
+                    while instance.is_running() and waited < max_wait:
+                        time.sleep(0.5)
+                        waited += 0.5
+                    if instance.is_running():
+                        logger.warning(
+                            f"Existing instance on port {instance.port} did not stop within {max_wait}s"
+                        )
+
         self.version = version
         self.install_dir = install_dir or Path.home() / ".keycloak-test"
         self._explicit_port = port is not None or management_port is not None
@@ -84,6 +106,10 @@ class KeycloakManager:
         self._output_thread: Optional[Thread] = None  # Thread for reading process output
         self._backup_dir: Optional[Path] = None  # Backup directory for data/conf
 
+        # Register this instance globally
+        with self._lock:
+            self._instances.append(self)
+
         # Register cleanup on exit
         atexit.register(self._cleanup_on_exit)
 
@@ -94,6 +120,39 @@ class KeycloakManager:
                 self.stop()
             except Exception as e:
                 logger.warning(f"Error during cleanup: {e}")
+
+        # Remove from global instances list
+        with self._lock:
+            if self in self._instances:
+                self._instances.remove(self)
+
+    @classmethod
+    def stop_all_instances(cls) -> None:
+        """
+        Stop all running Keycloak instances.
+
+        This is useful for test teardown or cleanup.
+        """
+        with cls._lock:
+            instances_to_stop = cls._instances[:]  # Create a copy
+            for instance in instances_to_stop:
+                if instance.is_running():
+                    logger.info(f"Stopping Keycloak instance on port {instance.port}")
+                    try:
+                        instance.stop()
+                    except Exception as e:
+                        logger.warning(f"Error stopping instance on port {instance.port}: {e}")
+
+    @classmethod
+    def get_running_instances_count(cls) -> int:
+        """
+        Get the count of currently running Keycloak instances.
+
+        Returns:
+            Number of running instances
+        """
+        with cls._lock:
+            return sum(1 for instance in cls._instances if instance.is_running())
 
     def _read_output(self, pipe, prefix: str = "") -> None:
         """
