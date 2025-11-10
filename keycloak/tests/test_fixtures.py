@@ -19,7 +19,6 @@ class TestPytestFixtures:
         assert keycloak_config.port == 8080  # Default port
         assert keycloak_config.admin_user == "admin"
         assert keycloak_config.admin_password == "admin"
-        assert keycloak_config.auto_cleanup is False  # Uses shared installation
 
     def test_keycloak_config_realm(self, keycloak_config):
         """Test that keycloak_config has proper realm configuration."""
@@ -295,7 +294,6 @@ class TestPytestFixtures:
         assert config.admin_password == "admin"
         assert config.install_dir is None
         assert config.realm is None
-        assert config.auto_cleanup is True
 
         # Custom config
         realm = RealmConfig(realm="custom", users=[], clients=[])
@@ -306,7 +304,6 @@ class TestPytestFixtures:
             admin_password="custom_pass",
             install_dir=tmp_path,
             realm=realm,
-            auto_cleanup=False,
         )
         assert config.version == "25.0.0"
         assert config.port == 9090
@@ -314,7 +311,6 @@ class TestPytestFixtures:
         assert config.admin_password == "custom_pass"
         assert config.install_dir == tmp_path
         assert config.realm.realm == "custom"
-        assert config.auto_cleanup is False
 
     def test_realm_import_with_multiple_users_and_clients(self, keycloak_client):
         """Test that realm import works with multiple users and clients."""

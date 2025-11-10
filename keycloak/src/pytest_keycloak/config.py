@@ -127,4 +127,3 @@ class KeycloakConfig(BaseModel):
     admin_password: str = "admin"
     install_dir: Optional[Path] = None
     realm: Optional[RealmConfig] = None
-    auto_cleanup: bool = True

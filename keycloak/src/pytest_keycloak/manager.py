@@ -759,17 +759,3 @@ class KeycloakManager:
             Base URL (http://localhost:{port})
         """
         return f"http://localhost:{self.port}"
-
-    def cleanup(self) -> None:
-        """
-        Clean up resources.
-
-        - Stop server if running
-        - Optionally delete installation (not implemented by default for safety)
-        """
-        self.stop()
-
-        # Note: We don't delete the installation by default to allow reuse
-        # across test sessions. Users can manually delete ~/.keycloak-test
-        # if they want to clean up.
-        logger.info(f"Keycloak installation preserved at {self.install_dir}")

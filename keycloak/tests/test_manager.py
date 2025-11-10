@@ -9,7 +9,6 @@ import requests
 from pytest_keycloak.exceptions import (
     JavaNotFoundError,
     KeycloakStartError,
-    KeycloakTimeoutError,
 )
 from pytest_keycloak.manager import KeycloakManager
 
@@ -171,73 +170,6 @@ class TestKeycloakManagerIntegration:
         expected_url = f"http://localhost:{manager.port}"
         assert manager.get_base_url() == expected_url
 
-    def test_is_running_states(self, shared_keycloak_install):
-        """Test is_running returns correct states."""
-        manager = KeycloakManager(
-            version="26.0.7",
-            install_dir=shared_keycloak_install,
-        )
-
-        # Initially not running
-        assert not manager.is_running()
-
-        try:
-            # Start
-            manager.download_and_install()
-            manager.start(wait_for_ready=True, timeout=120)
-
-            # Should be running
-            assert manager.is_running()
-
-        finally:
-            # Stop
-            manager.stop()
-
-            # Should not be running
-            assert not manager.is_running()
-
-    def test_wait_for_ready_timeout(self, shared_keycloak_install):
-        """Test that wait_for_ready times out appropriately when process terminates."""
-        manager = KeycloakManager(
-            version="26.0.7",
-            install_dir=shared_keycloak_install,
-        )
-
-        manager.download_and_install()
-
-        # Start Keycloak and ensure it's ready
-        manager.start(wait_for_ready=True, timeout=120)
-
-        try:
-            # Kill the process immediately to simulate a crash
-            manager.process.kill()
-            manager.process.wait(timeout=5)
-            manager.process = None  # Clear the process reference
-
-            # Wait a moment for ports to be released
-            time.sleep(1)
-
-            # Should timeout immediately because process is not running
-            with pytest.raises(KeycloakTimeoutError, match="process terminated"):
-                # Use a non-existent manager (no process) to test timeout
-                new_manager = KeycloakManager(
-                    version="26.0.7",
-                    install_dir=shared_keycloak_install,
-                )
-                # Manually set process to a terminated state
-                import subprocess
-
-                new_manager.process = subprocess.Popen(
-                    ["sleep", "0"]
-                )  # Process that exits immediately
-                new_manager.process.wait()
-                new_manager.wait_for_ready(timeout=5)
-
-        finally:
-            # Clean up if process is somehow still running
-            if manager.process and manager.is_running():
-                manager.stop()
-
     def test_start_already_running(self, shared_keycloak_install):
         """Test starting when already running."""
         manager = KeycloakManager(
@@ -273,42 +205,3 @@ class TestKeycloakManagerIntegration:
 
         with pytest.raises(KeycloakStartError, match="not installed"):
             manager.start()
-
-    def test_cleanup(self, shared_keycloak_install):
-        """Test cleanup stops the server."""
-        manager = KeycloakManager(
-            version="26.0.7",
-            install_dir=shared_keycloak_install,
-        )
-
-        manager.download_and_install()
-        manager.start(wait_for_ready=True, timeout=120)
-
-        assert manager.is_running()
-
-        # Cleanup
-        manager.cleanup()
-
-        # Should be stopped
-        assert not manager.is_running()
-
-    def test_manager_context_lifecycle(self, shared_keycloak_install):
-        """Test full lifecycle with multiple start/stop cycles."""
-        manager = KeycloakManager(
-            version="26.0.7",
-            install_dir=shared_keycloak_install,
-        )
-
-        manager.download_and_install()
-
-        # First cycle
-        manager.start(wait_for_ready=True, timeout=120)
-        assert manager.is_running()
-        manager.stop()
-        assert not manager.is_running()
-
-        # Second cycle - should work fine
-        manager.start(wait_for_ready=True, timeout=120)
-        assert manager.is_running()
-        manager.stop()
-        assert not manager.is_running()

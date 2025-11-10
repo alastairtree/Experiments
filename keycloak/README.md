@@ -237,9 +237,7 @@ KeycloakConfig(
     admin_user="admin",         # Admin username
     admin_password="admin",     # Admin password
     install_dir=None,           # Install location (default: ~/.keycloak-test)
-    realm=None,                 # Realm configuration
-    auto_cleanup=True           # Auto cleanup on exit
-)
+    realm=None,                 # Realm configuration)
 ```
 
 ### RealmConfig
@@ -334,7 +332,6 @@ def keycloak_config():
 @pytest.fixture(scope="session")
 def keycloak_config():
     return KeycloakConfig(
-        auto_cleanup=False,  # Keep Keycloak running after tests
         realm=RealmConfig(realm="test-realm")
     )
 ```

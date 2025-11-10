@@ -111,10 +111,6 @@ def keycloak(keycloak_config: KeycloakConfig) -> Generator[KeycloakManager, None
     logger.info("🧹 Cleaning up Keycloak session fixture...")
     manager.stop()
 
-    if keycloak_config.auto_cleanup:
-        logger.info("🗑️  Removing Keycloak installation...")
-        manager.cleanup()
-
 
 @pytest.fixture(scope="session")
 def keycloak_client(

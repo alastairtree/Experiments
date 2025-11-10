@@ -70,7 +70,6 @@ def keycloak_config(shared_keycloak_install):
                 )
             ],
         ),
-        auto_cleanup=False,  # Don't delete shared installation
     )
 
 
