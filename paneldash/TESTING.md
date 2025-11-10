@@ -5,27 +5,29 @@
 ### Backend Testing ✅ (75% Coverage)
 
 **Test Suite: 52 tests passing**
+
 - 32 Integration Tests
 - 20 Unit Tests
 
 #### Coverage by Module
 
-| Module | Coverage | Status | Notes |
-|--------|----------|--------|-------|
-| Schemas (config.py, tenant.py, user.py) | 100% | ✅ | Full Pydantic validation |
-| Models (central.py, base.py) | 86-97% | ✅ | Core data models |
-| Services (config_loader.py) | 85% | ✅ | YAML configuration |
-| Services (panel_factory.py) | 83% | ✅ | Panel creation |
-| API (auth.py) | 94% | ✅ | Authentication |
-| Auth (dependencies.py) | 68% | ⚠️ | Core paths covered |
-| Auth (keycloak.py) | 44% | ⚠️ | Integration tested |
-| API (tenants.py, users.py) | 42-51% | ⚠️ | Integration tested |
-| Database | 34% | ⚠️ | Connection management |
-| **TOTAL** | **75%** | ✅ | **Comprehensive** |
+| Module                                  | Coverage | Status | Notes                    |
+| --------------------------------------- | -------- | ------ | ------------------------ |
+| Schemas (config.py, tenant.py, user.py) | 100%     | ✅     | Full Pydantic validation |
+| Models (central.py, base.py)            | 86-97%   | ✅     | Core data models         |
+| Services (config_loader.py)             | 85%      | ✅     | YAML configuration       |
+| Services (panel_factory.py)             | 83%      | ✅     | Panel creation           |
+| API (auth.py)                           | 94%      | ✅     | Authentication           |
+| Auth (dependencies.py)                  | 68%      | ⚠️     | Core paths covered       |
+| Auth (keycloak.py)                      | 44%      | ⚠️     | Integration tested       |
+| API (tenants.py, users.py)              | 42-51%   | ⚠️     | Integration tested       |
+| Database                                | 34%      | ⚠️     | Connection management    |
+| **TOTAL**                               | **75%**  | ✅     | **Comprehensive**        |
 
 #### Test Files
 
 **Integration Tests** (`tests/integration/`):
+
 - `test_api.py` - Health endpoint (2 tests)
 - `test_auth.py` - Authentication flow (6 tests)
 - `test_database.py` - Database schema (4 tests)
@@ -34,6 +36,7 @@
 - `test_users_api.py` - User management (8 tests)
 
 **Unit Tests** (`tests/unit/`):
+
 - `test_config_loader.py` - YAML configuration (9 tests)
 - `test_panel_factory.py` - Panel creation (11 tests)
 
@@ -51,18 +54,21 @@
 #### Test Files Created
 
 1. **`src/tests/api/client.test.ts`** (13 tests)
+
    - Token management (4 tests)
    - HTTP headers (1 test)
    - API endpoints: getHealth, getMe, getTenants, getUsers (6 tests)
    - CRUD operations: updateUser, deleteUser (2 tests)
 
 2. **`src/tests/components/ProtectedRoute.test.tsx`** (4 tests)
+
    - Loading state
    - Authenticated rendering
    - Admin access control
    - 403 error handling
 
 3. **`src/tests/components/TenantSelector.test.tsx`** (5 tests)
+
    - Loading state
    - Empty state
    - Tenant selection
@@ -74,17 +80,17 @@
 
 #### Coverage by Module
 
-| Module | Coverage | Status | Notes |
-|--------|----------|--------|-------|
-| TenantSelector | 100% | ✅ | Full component coverage |
-| ProtectedRoute | 93.1% | ✅ | Core logic covered |
-| API client | 59.57% | ✅ | All endpoints tested |
-| Health | 57.81% | ✅ | Core rendering tested |
-| AuthContext | 0% | ⚠️ | Better covered by E2E |
-| TenantContext | 0% | ⚠️ | Better covered by E2E |
-| Header | 0% | ⚠️ | Better covered by E2E |
-| Pages (Admin, Dashboard, Login) | 0% | ⚠️ | Better covered by E2E |
-| **TOTAL** | **21.74%** | ✅ | **Core logic tested** |
+| Module                          | Coverage   | Status | Notes                   |
+| ------------------------------- | ---------- | ------ | ----------------------- |
+| TenantSelector                  | 100%       | ✅     | Full component coverage |
+| ProtectedRoute                  | 93.1%      | ✅     | Core logic covered      |
+| API client                      | 59.57%     | ✅     | All endpoints tested    |
+| Health                          | 57.81%     | ✅     | Core rendering tested   |
+| AuthContext                     | 0%         | ⚠️     | Better covered by E2E   |
+| TenantContext                   | 0%         | ⚠️     | Better covered by E2E   |
+| Header                          | 0%         | ⚠️     | Better covered by E2E   |
+| Pages (Admin, Dashboard, Login) | 0%         | ⚠️     | Better covered by E2E   |
+| **TOTAL**                       | **21.74%** | ✅     | **Core logic tested**   |
 
 #### Coverage Gaps (Deferred to E2E)
 
@@ -131,6 +137,7 @@ No Docker containers required
 **Directory**: `tests/e2e/wiremock/`
 
 **Files**:
+
 ```
 tests/e2e/wiremock/
 ├── mappings/
@@ -145,6 +152,7 @@ tests/e2e/wiremock/
 ```
 
 **User Profiles**:
+
 1. **Logged Out**: No valid token
 2. **Regular User**:
    - Email: user@example.com
@@ -160,7 +168,7 @@ tests/e2e/wiremock/
 **File**: `docker-compose.e2e.yml`
 
 ```yaml
-version: '3.8'
+version: "3.8"
 
 services:
   postgres-e2e:
@@ -233,37 +241,39 @@ services:
 **Test Scenarios**:
 
 1. **`logged-out.spec.ts`**
+
    ```typescript
-   describe('Logged Out User', () => {
-     test('/ redirects to /login', async ({ page }) => {})
-     test('/dashboard redirects to /login', async ({ page }) => {})
-     test('/admin redirects to /login', async ({ page }) => {})
-     test('Login page shows Keycloak button', async ({ page }) => {})
-   })
+   describe("Logged Out User", () => {
+     test("/ redirects to /login", async ({ page }) => {});
+     test("/dashboard redirects to /login", async ({ page }) => {});
+     test("/admin redirects to /login", async ({ page }) => {});
+     test("Login page shows Keycloak button", async ({ page }) => {});
+   });
    ```
 
 2. **`regular-user.spec.ts`**
+
    ```typescript
-   describe('Regular User', () => {
-     test('can view dashboard', async ({ page }) => {})
-     test('can select tenant', async ({ page }) => {})
-     test('can see tenant information', async ({ page }) => {})
-     test('cannot access admin page', async ({ page }) => {})
-     test('can logout', async ({ page }) => {})
-   })
+   describe("Regular User", () => {
+     test("can view dashboard", async ({ page }) => {});
+     test("can select tenant", async ({ page }) => {});
+     test("can see tenant information", async ({ page }) => {});
+     test("cannot access admin page", async ({ page }) => {});
+     test("can logout", async ({ page }) => {});
+   });
    ```
 
 3. **`admin-user.spec.ts`**
    ```typescript
-   describe('Admin User', () => {
-     test('can view dashboard', async ({ page }) => {})
-     test('can access admin page', async ({ page }) => {})
-     test('can list all users', async ({ page }) => {})
-     test('can toggle admin rights', async ({ page }) => {})
-     test('can assign user to tenant', async ({ page }) => {})
-     test('can remove user from tenant', async ({ page }) => {})
-     test('can delete user', async ({ page }) => {})
-   })
+   describe("Admin User", () => {
+     test("can view dashboard", async ({ page }) => {});
+     test("can access admin page", async ({ page }) => {});
+     test("can list all users", async ({ page }) => {});
+     test("can toggle admin rights", async ({ page }) => {});
+     test("can assign user to tenant", async ({ page }) => {});
+     test("can remove user from tenant", async ({ page }) => {});
+     test("can delete user", async ({ page }) => {});
+   });
    ```
 
 #### 4. Test Fixtures & Helpers
@@ -306,27 +316,27 @@ export async function clearDatabase() {
 #### `playwright.config.ts`
 
 ```typescript
-import { defineConfig } from '@playwright/test'
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  testDir: './tests/e2e/specs',
-  fullyParallel: false,  // Run serially to avoid conflicts
+  testDir: "./tests/e2e/specs",
+  fullyParallel: false, // Run serially to avoid conflicts
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1,
-  reporter: 'html',
+  reporter: "html",
   use: {
-    baseURL: 'http://localhost:5174',
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    baseURL: "http://localhost:5174",
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
   },
   webServer: {
-    command: 'docker-compose -f docker-compose.e2e.yml up',
-    url: 'http://localhost:5174',
+    command: "docker-compose -f docker-compose.e2e.yml up",
+    url: "http://localhost:5174",
     reuseExistingServer: !process.env.CI,
     timeout: 120000,
   },
-})
+});
 ```
 
 #### `.env.e2e`
@@ -423,18 +433,21 @@ jobs:
 ## Testing Best Practices
 
 ### Backend
+
 - Use pgserver for isolated database testing
 - Mock external services (Keycloak) in unit tests
 - Integration tests for all API endpoints
 - Test both success and error paths
 
 ### Frontend
+
 - Use vitest for unit tests
 - Mock contexts and hooks
 - Test user interactions
 - Test error states and loading states
 
 ### E2E
+
 - Test real user workflows
 - Use WireMock for consistent auth
 - Seed database before each test
