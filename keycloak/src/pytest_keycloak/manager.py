@@ -642,6 +642,14 @@ class KeycloakManager:
             # Restore data and conf directories to original state
             self._restore_directories()
 
+            # Remove this instance from the global list
+            # Note: The lock is already held by the caller (stop() or __init__)
+            if self in self._instances:
+                self._instances.remove(self)
+                logger.debug(
+                    f"Removed instance from global list (remaining: {len(self._instances)})"
+                )
+
     def stop(self, timeout: int = 10) -> None:
         """
         Stop the Keycloak server gracefully.
