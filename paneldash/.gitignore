@@ -1,28 +1,106 @@
 # Development runtime directories
 keycloak-dev-server/
-node_modules/
-test-results/
 devstart.log
 
-# Test results
-tests/e2e/test-results/
-playwright-report/
-
-# Build cache
-.vite/
-dist/
-
-# Python cache
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
 .pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
 
-# Logs
-*.log
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
 
-# IDE
+# IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-store/
+
+# Vite
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/junit-results.xml
+tests/e2e/.pids.json
 
 # OS
-.DS_Store
+Thumbs.db
+
+# Alembic
+alembic/versions/*.pyc
+
+# Coverage
+.coverage.*
+coverage/
+tests/e2e/wiremock/wiremock-standalone.jar

@@ -1,0 +1,25 @@
+panel:
+  type: "kpi"
+  title: "Current Memory Usage"
+
+  data_source:
+    table: "metrics"
+    columns:
+      value: "memory_percent"
+    query: "metric_type = 'memory' ORDER BY recorded_at DESC LIMIT 1"
+
+  display:
+    unit: "%"
+    decimals: 1
+    thresholds:
+      - value: 0
+        color: "#10B981"    # Green
+        label: "good"
+      - value: 70
+        color: "#F59E0B"    # Amber
+        label: "warning"
+      - value: 90
+        color: "#EF4444"    # Red
+        label: "critical"
+
+  refresh_interval: 60
