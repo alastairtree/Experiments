@@ -9,6 +9,11 @@ This script orchestrates the complete development environment:
 5. Monitors all processes and provides health checks
 
 Usage:
+    pip install httpx
+    sudo apt-get update && sudo apt-get install -y openjdk-17-jdk
+    cd ../keycloak && ./build.sh --skip-tests        
+    cd ../paneldash/
+    sudo apt-get install -y postgresql-client
     python devstart.py [--clean] [--no-frontend]
 
 Options:
