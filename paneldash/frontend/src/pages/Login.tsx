@@ -2,27 +2,61 @@ import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
+const REDIRECT_COOLDOWN_KEY = 'keycloak_redirect_timestamp'
+const REDIRECT_COOLDOWN_MS = 15 * 60 * 1000 // 15 minutes
+
 export default function Login() {
   const { isAuthenticated, isLoading, login, keycloak } = useAuth()
   const navigate = useNavigate()
 
-  console.log(`🔐 Login page render: isLoading=${isLoading}, isAuthenticated=${isAuthenticated}, keycloak=${!!keycloak}`)
+  console.log(`🔐 [Login] Page render: isLoading=${isLoading}, isAuthenticated=${isAuthenticated}, keycloak=${!!keycloak}`)
 
   useEffect(() => {
-    console.log(`🔐 Login useEffect: isAuthenticated=${isAuthenticated}, isLoading=${isLoading}, keycloak=${!!keycloak}`)
+    console.log(`🔐 [Login] useEffect triggered: isAuthenticated=${isAuthenticated}, isLoading=${isLoading}, keycloak=${!!keycloak}`)
+
     // Redirect to dashboard if already authenticated
     if (isAuthenticated) {
-      console.log('🔐 Already authenticated, navigating to /dashboard')
+      console.log('✅ [Login] Already authenticated, navigating to /dashboard')
       navigate('/dashboard')
-    } else if (!isLoading && keycloak) {
-      // Automatically redirect to Keycloak when page loads
-      // This provides seamless authentication without requiring a button click
-      console.log('🔐 Not authenticated, redirecting to Keycloak login...')
+      return
+    }
+
+    if (!isLoading && keycloak) {
+      // Check redirect cooldown to prevent infinite loops
+      const lastRedirectStr = localStorage.getItem(REDIRECT_COOLDOWN_KEY)
+      const now = Date.now()
+
+      if (lastRedirectStr) {
+        const lastRedirect = parseInt(lastRedirectStr, 10)
+        const timeSinceLastRedirect = now - lastRedirect
+
+        if (timeSinceLastRedirect < REDIRECT_COOLDOWN_MS) {
+          const minutesRemaining = Math.ceil((REDIRECT_COOLDOWN_MS - timeSinceLastRedirect) / 60000)
+          console.log(`⏸️ [Login] Redirect cooldown active. ${minutesRemaining} minutes until auto-redirect enabled`)
+          console.log(`⏸️ [Login] User must click the login button manually`)
+          return
+        }
+      }
+
+      // Automatically redirect to Keycloak when page loads (only once per cooldown period)
+      console.log('🔐 [Login] Auto-redirecting to Keycloak login...')
+      localStorage.setItem(REDIRECT_COOLDOWN_KEY, now.toString())
       keycloak.login({
         redirectUri: window.location.origin + '/dashboard'
       })
     }
   }, [isAuthenticated, isLoading, keycloak, navigate])
+
+  const handleManualLogin = () => {
+    console.log('🔐 [Login] Manual login button clicked')
+    if (keycloak) {
+      // Update cooldown timestamp
+      localStorage.setItem(REDIRECT_COOLDOWN_KEY, Date.now().toString())
+      keycloak.login({
+        redirectUri: window.location.origin + '/dashboard'
+      })
+    }
+  }
 
   if (isLoading) {
     return (
@@ -48,7 +82,7 @@ export default function Login() {
         </div>
         <div className="mt-8 space-y-6">
           <button
-            onClick={login}
+            onClick={handleManualLogin}
             className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
           >
             Sign in with Keycloak

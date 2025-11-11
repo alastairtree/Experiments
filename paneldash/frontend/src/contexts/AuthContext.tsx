@@ -28,34 +28,80 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initKeycloak = async () => {
-      console.log('Initializing Keycloak...')
+      console.log('🔐 [AuthContext] Initializing Keycloak...')
+      console.log('🔐 [AuthContext] Current URL:', window.location.href)
+      console.log('🔐 [AuthContext] URL hash:', window.location.hash)
+
       const kc = new Keycloak(keycloakConfig)
 
+      // Set up Keycloak event handlers
+      kc.onReady = (authenticated) => {
+        console.log('🔐 [Keycloak Event] onReady - authenticated:', authenticated)
+      }
+
+      kc.onAuthSuccess = () => {
+        console.log('✅ [Keycloak Event] onAuthSuccess - Authentication successful!')
+        console.log('✅ [Keycloak Event] Token:', kc.token?.substring(0, 50) + '...')
+        console.log('✅ [Keycloak Event] Refresh token:', kc.refreshToken?.substring(0, 50) + '...')
+      }
+
+      kc.onAuthError = (errorData) => {
+        console.error('❌ [Keycloak Event] onAuthError:', errorData)
+      }
+
+      kc.onAuthRefreshSuccess = () => {
+        console.log('🔄 [Keycloak Event] onAuthRefreshSuccess - Token refreshed')
+      }
+
+      kc.onAuthRefreshError = () => {
+        console.error('❌ [Keycloak Event] onAuthRefreshError - Failed to refresh token')
+      }
+
+      kc.onAuthLogout = () => {
+        console.log('🚪 [Keycloak Event] onAuthLogout - User logged out')
+      }
+
+      kc.onTokenExpired = () => {
+        console.log('⏰ [Keycloak Event] onTokenExpired - Token has expired')
+      }
+
       try {
+        console.log('🔐 [AuthContext] Calling kc.init() with check-sso...')
         const authenticated = await kc.init({
           onLoad: 'check-sso',
           pkceMethod: 'S256',
           checkLoginIframe: false,
+          enableLogging: true, // Enable Keycloak's internal logging
         })
 
-        console.log('Keycloak initialized. Authenticated:', authenticated)
+        console.log('🔐 [AuthContext] kc.init() completed. Authenticated:', authenticated)
+        console.log('🔐 [AuthContext] Has token:', !!kc.token)
+        console.log('🔐 [AuthContext] Has refresh token:', !!kc.refreshToken)
+
         setKeycloak(kc)
 
         if (authenticated && kc.token) {
+          console.log('✅ [AuthContext] User authenticated, setting token in API client')
           apiClient.setToken(kc.token)
 
           try {
+            console.log('📡 [AuthContext] Fetching user data from backend...')
             const userData = await apiClient.getMe()
+            console.log('✅ [AuthContext] User data fetched:', userData)
             setUser(userData)
             setIsAuthenticated(true)
           } catch (error) {
-            console.error('Failed to fetch user info:', error)
+            console.error('❌ [AuthContext] Failed to fetch user info:', error)
           }
+        } else {
+          console.log('❌ [AuthContext] Not authenticated after init')
         }
 
         setIsLoading(false)
+        console.log('🔐 [AuthContext] Initialization complete, isLoading set to false')
       } catch (error) {
-        console.error('Keycloak initialization failed:', error)
+        console.error('❌ [AuthContext] Keycloak initialization failed:', error)
+        console.error('❌ [AuthContext] Error details:', JSON.stringify(error, null, 2))
         setIsLoading(false)
       }
     }

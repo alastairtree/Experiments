@@ -188,11 +188,12 @@ def start_keycloak(port: int = 8080):
                     "http://localhost:3000/*",
                 ],
                 web_origins=[
-                    "http://localhost:5173",
-                    "http://localhost:5174",
-                    "http://localhost:3000",
+                    "+",  # Allow all origins from redirect_uris
                 ],
                 direct_access_grants_enabled=True,
+                standard_flow_enabled=True,  # Enable authorization code flow
+                implicit_flow_enabled=False,
+                full_scope_allowed=True,
             ),
             # Backend API client (confidential)
             ClientConfig(
