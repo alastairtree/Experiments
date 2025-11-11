@@ -11,7 +11,7 @@ export default defineConfig({
   reporter: [['list'], ['html', { outputFolder: './test-results/html' }]],
 
   use: {
-    baseURL: 'http://localhost:5174',
+    baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
     screenshot: 'on',
     video: 'retain-on-failure',
