@@ -6,14 +6,18 @@ export default function Login() {
   const { isAuthenticated, isLoading, login, keycloak } = useAuth()
   const navigate = useNavigate()
 
+  console.log(`🔐 Login page render: isLoading=${isLoading}, isAuthenticated=${isAuthenticated}, keycloak=${!!keycloak}`)
+
   useEffect(() => {
+    console.log(`🔐 Login useEffect: isAuthenticated=${isAuthenticated}, isLoading=${isLoading}, keycloak=${!!keycloak}`)
     // Redirect to dashboard if already authenticated
     if (isAuthenticated) {
+      console.log('🔐 Already authenticated, navigating to /dashboard')
       navigate('/dashboard')
     } else if (!isLoading && keycloak) {
       // Automatically redirect to Keycloak when page loads
       // This provides seamless authentication without requiring a button click
-      console.log('Login page loaded, redirecting to Keycloak...')
+      console.log('🔐 Not authenticated, redirecting to Keycloak login...')
       keycloak.login({
         redirectUri: window.location.origin + '/dashboard'
       })

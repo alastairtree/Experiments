@@ -28,56 +28,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initKeycloak = async () => {
+      console.log('Initializing Keycloak...')
       const kc = new Keycloak(keycloakConfig)
 
       try {
-        // Use check-sso to avoid automatic redirect
-        // We'll handle the redirect manually via the Login page
         const authenticated = await kc.init({
           onLoad: 'check-sso',
           pkceMethod: 'S256',
-          checkLoginIframe: false, // Disable iframe checks which can cause issues in testing
+          checkLoginIframe: false,
         })
 
+        console.log('Keycloak initialized. Authenticated:', authenticated)
         setKeycloak(kc)
 
         if (authenticated && kc.token) {
-          // Set token in API client
           apiClient.setToken(kc.token)
 
-          // Fetch user info from backend
           try {
             const userData = await apiClient.getMe()
             setUser(userData)
             setIsAuthenticated(true)
-            setIsLoading(false) // Only set loading false after successful auth
           } catch (error) {
             console.error('Failed to fetch user info:', error)
-            // Token might be invalid, try to logout
-            await kc.logout()
-            setIsLoading(false)
           }
-
-          // Set up token refresh
-          kc.onTokenExpired = () => {
-            kc
-              .updateToken(30)
-              .then((refreshed) => {
-                if (refreshed && kc.token) {
-                  apiClient.setToken(kc.token)
-                  console.log('Token refreshed')
-                }
-              })
-              .catch((error) => {
-                console.error('Failed to refresh token:', error)
-                setIsAuthenticated(false)
-                setUser(null)
-              })
-          }
-        } else {
-          // Not authenticated
-          setIsLoading(false)
         }
+
+        setIsLoading(false)
       } catch (error) {
         console.error('Keycloak initialization failed:', error)
         setIsLoading(false)
@@ -93,14 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
-      // Call backend logout endpoint
       if (isAuthenticated) {
         await apiClient.logout()
       }
     } catch (error) {
       console.error('Backend logout failed:', error)
     } finally {
-      // Always logout from Keycloak
       keycloak?.logout()
       setIsAuthenticated(false)
       setUser(null)

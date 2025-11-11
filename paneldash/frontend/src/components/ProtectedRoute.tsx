@@ -12,7 +12,10 @@ export default function ProtectedRoute({
 }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading, user } = useAuth()
 
+  console.log(`🛡️ ProtectedRoute render: isLoading=${isLoading}, isAuthenticated=${isAuthenticated}`)
+
   if (isLoading) {
+    console.log('🛡️ ProtectedRoute: Showing loading screen')
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
@@ -24,6 +27,7 @@ export default function ProtectedRoute({
   }
 
   if (!isAuthenticated) {
+    console.log('🛡️ ProtectedRoute: Not authenticated, redirecting to /login')
     return <Navigate to="/login" replace />
   }
 

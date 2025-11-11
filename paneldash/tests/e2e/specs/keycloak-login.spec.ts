@@ -72,8 +72,9 @@ test.describe('Keycloak Login Flow', () => {
     console.log('  Step 1: Navigating to application...')
     await page.goto('/', { waitUntil: 'networkidle', timeout: 30000 })
 
-    // Wait a bit to see if there are any initial redirects
-    await page.waitForTimeout(2000)
+    // Wait for Keycloak initialization to complete - increase timeout
+    console.log('  Waiting for Keycloak initialization (10 seconds)...')
+    await page.waitForTimeout(10000)
 
     const currentUrl = page.url()
     console.log(`  Current URL after initial navigation: ${currentUrl}`)
@@ -161,8 +162,9 @@ test.describe('Keycloak Login Flow', () => {
     console.log(`    Final URL: ${finalUrl}`)
 
     // Take a screenshot of the final state
-    await page.screenshot({ path: 'test-results/after-login.png', fullPage: true })
-    console.log('    📸 Screenshot saved: after-login.png')
+    // DISABLED - causes browser crash
+    // await page.screenshot({ path: 'test-results/after-login.png', fullPage: true })
+    // console.log('    📸 Screenshot saved: after-login.png')
 
     // Check if we're stuck in a redirect loop
     if (redirectCount > 3) {
