@@ -9,6 +9,7 @@ interface AuthContextType {
   keycloak: Keycloak | null
   login: () => void
   logout: () => void
+  isInitialized: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -20,19 +21,31 @@ const keycloakConfig = {
   clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'paneldash-frontend',
 }
 
+const kc = new Keycloak(keycloakConfig)
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [user, setUser] = useState<User | null>(null)
   const [keycloak, setKeycloak] = useState<Keycloak | null>(null)
+  const [isInitialized, setIsInitialized] = useState(false)
 
   useEffect(() => {
     const initKeycloak = async () => {
+
+      if (isInitialized) {
+        console.log('🔐 [AuthContext] Keycloak is already initialized')
+        return
+      }
+      setIsInitialized(true)
+
       console.log('🔐 [AuthContext] Initializing Keycloak...')
       console.log('🔐 [AuthContext] Current URL:', window.location.href)
       console.log('🔐 [AuthContext] URL hash:', window.location.hash)
 
-      const kc = new Keycloak(keycloakConfig)
+      console.log('🔐 [AuthContext] Creating Keycloak instance with config:', keycloakConfig)
+      
+      setKeycloak(kc)
 
       // Set up Keycloak event handlers
       kc.onReady = (authenticated) => {
@@ -65,12 +78,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('⏰ [Keycloak Event] onTokenExpired - Token has expired')
       }
 
+
       try {
-        console.log('🔐 [AuthContext] Calling kc.init() with check-sso...')
+        console.log('🔐 [AuthContext] Calling kc.init() with login-required...')
         const authenticated = await kc.init({
-          onLoad: 'check-sso',
+          onLoad: 'login-required',
           pkceMethod: 'S256',
-          checkLoginIframe: false,
+          //checkLoginIframe: false,
           enableLogging: true, // Enable Keycloak's internal logging
         })
 
@@ -78,7 +92,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('🔐 [AuthContext] Has token:', !!kc.token)
         console.log('🔐 [AuthContext] Has refresh token:', !!kc.refreshToken)
 
-        setKeycloak(kc)
 
         if (authenticated && kc.token) {
           console.log('✅ [AuthContext] User authenticated, setting token in API client')
@@ -110,10 +123,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = () => {
+    console.log('🔐 [AuthContext] Triggering login...')
     keycloak?.login()
   }
 
   const logout = async () => {
+    console.log('🔐 [AuthContext] Triggering logout...')
     try {
       if (isAuthenticated) {
         await apiClient.logout()
@@ -136,6 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         keycloak,
         login,
         logout,
+        isInitialized
       }}
     >
       {children}
@@ -145,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext)
+  console.log('🔐 [useAuth] Context accessed:', context)
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider')
   }
