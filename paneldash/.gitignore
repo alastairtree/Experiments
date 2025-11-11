@@ -1,0 +1,24 @@
+# Development runtime directories
+keycloak-dev-server/
+node_modules/
+test-results/
+devstart.log
+
+# Test results
+tests/e2e/test-results/
+playwright-report/
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
