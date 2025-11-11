@@ -8,6 +8,10 @@ devstart.log
 tests/e2e/test-results/
 playwright-report/
 
+# Build cache
+.vite/
+dist/
+
 # Python cache
 __pycache__/
 *.pyc
