@@ -3,15 +3,22 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
-  const { isAuthenticated, isLoading, login } = useAuth()
+  const { isAuthenticated, isLoading, login, keycloak } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
     // Redirect to dashboard if already authenticated
     if (isAuthenticated) {
       navigate('/dashboard')
+    } else if (!isLoading && keycloak) {
+      // Automatically redirect to Keycloak when page loads
+      // This provides seamless authentication without requiring a button click
+      console.log('Login page loaded, redirecting to Keycloak...')
+      keycloak.login({
+        redirectUri: window.location.origin + '/dashboard'
+      })
     }
-  }, [isAuthenticated, navigate])
+  }, [isAuthenticated, isLoading, keycloak, navigate])
 
   if (isLoading) {
     return (

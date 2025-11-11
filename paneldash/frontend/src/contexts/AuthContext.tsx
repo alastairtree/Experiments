@@ -31,10 +31,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const kc = new Keycloak(keycloakConfig)
 
       try {
+        // Use check-sso to avoid automatic redirect
+        // We'll handle the redirect manually via the Login page
         const authenticated = await kc.init({
-          onLoad: 'login-required',
-          silentCheckSsoRedirectUri: window.location.origin + '/silent-check-sso.html',
+          onLoad: 'check-sso',
           pkceMethod: 'S256',
+          checkLoginIframe: false, // Disable iframe checks which can cause issues in testing
         })
 
         setKeycloak(kc)
@@ -48,10 +50,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const userData = await apiClient.getMe()
             setUser(userData)
             setIsAuthenticated(true)
+            setIsLoading(false) // Only set loading false after successful auth
           } catch (error) {
             console.error('Failed to fetch user info:', error)
             // Token might be invalid, try to logout
             await kc.logout()
+            setIsLoading(false)
           }
 
           // Set up token refresh
@@ -70,10 +74,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setUser(null)
               })
           }
+        } else {
+          // Not authenticated
+          setIsLoading(false)
         }
       } catch (error) {
         console.error('Keycloak initialization failed:', error)
-      } finally {
         setIsLoading(false)
       }
     }
