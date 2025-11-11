@@ -21,7 +21,17 @@ const keycloakConfig = {
   clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'paneldash-frontend',
 }
 
-const kc = new Keycloak(keycloakConfig)
+declare global {
+    // Note the capital "W"
+    interface Window { __kc_init: any; }
+}
+// HACK to force single instance of Keycloak
+window.__kc_init = window.__kc_init || {};
+if (!window.__kc_init.kc) {
+  console.log('🔐 [AuthContext] Initializing Keycloak instance...')
+  window.__kc_init.kc = new Keycloak(keycloakConfig)
+}
+const kc = window.__kc_init.kc;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -81,6 +91,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         console.log('🔐 [AuthContext] Calling kc.init() with login-required...')
+
+        function timeout(delay: number) {
+            return new Promise( res => setTimeout(res, delay) );
+        }
+
+        await timeout(2000); // Wait for 1 second to ensure Keycloak is ready
         const authenticated = await kc.init({
           onLoad: 'login-required',
           pkceMethod: 'S256',
