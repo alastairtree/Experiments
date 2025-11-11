@@ -70,11 +70,20 @@ test.describe('Keycloak Login Flow', () => {
 
     // Step 1: Navigate to the application
     console.log('  Step 1: Navigating to application...')
+
+    // Set up promise to wait for Keycloak initialization log
+    const keycloakInitPromise = page.waitForEvent('console', msg => {
+      return msg.text().includes('Keycloak initialized')
+    }, { timeout: 15000 }).catch(() => {
+      console.log('  ⚠️  Timeout waiting for Keycloak initialization log')
+    })
+
     await page.goto('/', { waitUntil: 'networkidle', timeout: 30000 })
 
-    // Wait for Keycloak initialization to complete - increase timeout
-    console.log('  Waiting for Keycloak initialization (10 seconds)...')
-    await page.waitForTimeout(10000)
+    // Wait for Keycloak initialization to complete
+    console.log('  Waiting for Keycloak initialization...')
+    await keycloakInitPromise
+    console.log('  Keycloak initialization detected!')
 
     const currentUrl = page.url()
     console.log(`  Current URL after initial navigation: ${currentUrl}`)
