@@ -340,6 +340,45 @@ def run_migrations(db_info):
         logger.warning("   Continuing anyway...")
 
 
+def seed_database(db_info):
+    """Seed the database with development data."""
+    logger.info("🌱 Seeding database with development data...")
+
+    # Set up environment for seed script
+    env = os.environ.copy()
+    if db_info.socket_dir:
+        env["CENTRAL_DB_HOST"] = db_info.socket_dir
+    else:
+        env["CENTRAL_DB_HOST"] = "localhost"
+    env["CENTRAL_DB_PORT"] = str(db_info.port)
+    env["CENTRAL_DB_NAME"] = "paneldash_central"
+    env["CENTRAL_DB_USER"] = "postgres"
+    env["CENTRAL_DB_PASSWORD"] = ""
+
+    try:
+        # Run the seed script
+        result = subprocess.run(
+            ["uv", "run", "python", "scripts/seed_db.py"],
+            cwd=BACKEND_DIR,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        logger.info("✅ Database seeded")
+        # Print seed output for user info
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    logger.info(f"   {line}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ Database seeding failed: {e}")
+        logger.error(f"   stdout: {e.stdout}")
+        logger.error(f"   stderr: {e.stderr}")
+        # Don't fail - data might already exist
+        logger.warning("   Continuing anyway...")
+
+
 def start_backend(db_info, keycloak_port: int = 8080):
     """Start the backend API server."""
     logger.info("🚀 Starting backend API...")
@@ -441,15 +480,18 @@ def monitor_processes():
     logger.info("=" * 60)
     logger.info("")
     logger.info("Services:")
-    logger.info("  🔑 Keycloak:    http://localhost:8080")
+    logger.info("  🔑 Keycloak:      http://localhost:8080")
     logger.info("  🔑 Admin Console: http://localhost:8080/admin (admin/admin)")
-    logger.info("  🚀 Backend API: http://localhost:8001")
-    logger.info("  📖 API Docs:    http://localhost:8001/docs")
-    logger.info("  🎨 Frontend:    http://localhost:5173")
+    logger.info("  🚀 Backend API:   http://localhost:8001")
+    logger.info("  📖 API Docs:      http://localhost:8001/docs")
+    logger.info("  🎨 Frontend:      http://localhost:5173")
     logger.info("")
     logger.info("Test Credentials:")
     logger.info("  👤 Regular User: testuser / testpass")
     logger.info("  👤 Admin User:   adminuser / adminpass")
+    logger.info("")
+    logger.info("Test Tenant:")
+    logger.info("  🏢 example-tenant (both users have access)")
     logger.info("")
     logger.info("Press Ctrl+C to stop all services")
     logger.info("=" * 60)
@@ -497,6 +539,9 @@ def main():
 
     # Run migrations
     run_migrations(pg_info)
+
+    # Seed database with development data
+    seed_database(pg_info)
 
     # Start backend
     backend_proc = start_backend(pg_info, keycloak_port=args.keycloak_port)

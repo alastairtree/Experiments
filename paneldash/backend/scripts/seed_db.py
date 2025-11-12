@@ -25,85 +25,64 @@ async def seed_database() -> None:
             print("⚠️  Database already contains data. Skipping seed.")
             return
 
-        # Create test users
+        # Create test users matching Keycloak users from devstart.py
         print("Creating users...")
+
+        # Admin user (matches adminuser from Keycloak)
         admin_user = User(
-            keycloak_id="admin-keycloak-id",
-            email="admin@paneldash.local",
+            keycloak_id="adminuser-keycloak-id",  # Will be replaced with real ID on first login
+            email="admin@example.com",
             full_name="Admin User",
             is_admin=True,
         )
         session.add(admin_user)
 
-        user1 = User(
-            keycloak_id="user1-keycloak-id",
-            email="user1@paneldash.local",
-            full_name="Test User 1",
+        # Test user (matches testuser from Keycloak)
+        test_user = User(
+            keycloak_id="testuser-keycloak-id",  # Will be replaced with real ID on first login
+            email="testuser@example.com",
+            full_name="Test User",
             is_admin=False,
         )
-        session.add(user1)
-
-        user2 = User(
-            keycloak_id="user2-keycloak-id",
-            email="user2@paneldash.local",
-            full_name="Test User 2",
-            is_admin=False,
-        )
-        session.add(user2)
+        session.add(test_user)
 
         await session.flush()  # Get IDs without committing
-        print(f"✓ Created 3 users (admin: {admin_user.email})")
+        print(f"✓ Created 2 users (admin: {admin_user.email}, test: {test_user.email})")
 
-        # Create test tenants
+        # Create example tenant matching the tenant config in /tenants/example-tenant/
         print("Creating tenants...")
-        tenant_alpha = Tenant(
-            tenant_id="tenant-alpha",
-            name="Alpha Corporation",
-            database_name="tenant_alpha",
+        example_tenant = Tenant(
+            tenant_id="example-tenant",
+            name="Example Tenant",
+            database_name="tenant_example",
             database_host=settings.central_db_host,
             database_port=settings.central_db_port,
             database_user=settings.central_db_user,
             database_password=settings.central_db_password,
             is_active=True,
         )
-        session.add(tenant_alpha)
-
-        tenant_beta = Tenant(
-            tenant_id="tenant-beta",
-            name="Beta Industries",
-            database_name="tenant_beta",
-            database_host=settings.central_db_host,
-            database_port=settings.central_db_port,
-            database_user=settings.central_db_user,
-            database_password=settings.central_db_password,
-            is_active=True,
-        )
-        session.add(tenant_beta)
+        session.add(example_tenant)
 
         await session.flush()
-        print(f"✓ Created 2 tenants ({tenant_alpha.name}, {tenant_beta.name})")
+        print(f"✓ Created tenant: {example_tenant.name} (ID: {example_tenant.tenant_id})")
 
         # Create user-tenant mappings
         print("Creating user-tenant mappings...")
-        # Admin has access to all tenants
-        session.add(UserTenant(user_id=admin_user.id, tenant_id=tenant_alpha.id))
-        session.add(UserTenant(user_id=admin_user.id, tenant_id=tenant_beta.id))
+        # Both admin and test user have access to example-tenant
+        session.add(UserTenant(user_id=admin_user.id, tenant_id=example_tenant.id))
+        session.add(UserTenant(user_id=test_user.id, tenant_id=example_tenant.id))
 
-        # User1 has access to tenant-alpha
-        session.add(UserTenant(user_id=user1.id, tenant_id=tenant_alpha.id))
-
-        # User2 has access to tenant-beta
-        session.add(UserTenant(user_id=user2.id, tenant_id=tenant_beta.id))
-
-        print("✓ Created 4 user-tenant mappings")
+        print("✓ Created 2 user-tenant mappings")
 
         # Commit all changes
         await session.commit()
         print("✅ Database seeded successfully!")
-        print("\nDevelopment Users:")
-        print(f"  - {admin_user.email} (admin, access to all tenants)")
-        print(f"  - {user1.email} (access to {tenant_alpha.name})")
-        print(f"  - {user2.email} (access to {tenant_beta.name})")
+        print("\nDevelopment Users (matching Keycloak):")
+        print(f"  - {admin_user.email} (admin, username: adminuser, password: adminpass)")
+        print(f"  - {test_user.email} (user, username: testuser, password: testpass)")
+        print(f"\nDevelopment Tenant:")
+        print(f"  - {example_tenant.name} (ID: {example_tenant.tenant_id})")
+        print(f"    Both users have access to this tenant")
 
 
 async def main() -> None:
