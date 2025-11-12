@@ -30,7 +30,7 @@ async def seed_database() -> None:
 
         # Admin user (matches adminuser from Keycloak)
         admin_user = User(
-            keycloak_id="adminuser-keycloak-id",  # Will be replaced with real ID on first login
+            keycloak_id=None,  # Will be replaced with real ID on first login
             email="admin@example.com",
             full_name="Admin User",
             is_admin=True,
@@ -39,7 +39,7 @@ async def seed_database() -> None:
 
         # Test user (matches testuser from Keycloak)
         test_user = User(
-            keycloak_id="testuser-keycloak-id",  # Will be replaced with real ID on first login
+            keycloak_id=None,  # Will be replaced with real ID on first login
             email="testuser@example.com",
             full_name="Test User",
             is_admin=False,

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import db_manager
-
+import logging
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
@@ -38,6 +38,7 @@ app = FastAPI(
 origins = [
     "http://localhost",
     "http://localhost:5173",
+    "http://localhost:8080",
 ]
 
 app.add_middleware(
@@ -47,6 +48,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logging.basicConfig(level=logging.DEBUG,
+                    format="%(asctime)s | %(levelname)-8s | "
+                           "%(module)s:%(funcName)s:%(lineno)d - %(message)s")
 
 # Import routers
 from app.api.v1 import auth, dashboards, panels, tenants, users  # noqa: E402

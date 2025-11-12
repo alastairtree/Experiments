@@ -45,16 +45,33 @@ async def get_current_user_from_token(
         user_info = keycloak_auth.extract_user_info(token_payload)
 
         keycloak_id = user_info.get("keycloak_id")
+        email = user_info.get("email")
         if not keycloak_id:
             raise credentials_exception
 
         # Find or create user in our database
-        result = await db.execute(
-            select(User).where(User.keycloak_id == keycloak_id)
+        results = await db.execute(
+            select(User).where(User.keycloak_id == keycloak_id or User.email == email).order_by(User.created_at)
         )
-        user = result.scalar_one_or_none()
+        selected_user = None
+        for existing_user in results.scalars().all():
+            if existing_user.keycloak_id == keycloak_id:
+                selected_user = existing_user
+                break
+            if existing_user.email == email and (existing_user.keycloak_id is None or existing_user.keycloak_id == "") and not selected_user:
+                selected_user = existing_user
+                break
 
-        if not user:
+        # if we found a user by only email match then update their keycloak_id
+        if selected_user and selected_user.keycloak_id != keycloak_id:
+            selected_user.keycloak_id = keycloak_id
+            db.add(selected_user)
+            await db.commit()
+            await db.refresh(selected_user)
+
+        if selected_user:
+            return selected_user
+        else:
             # Auto-create user on first login
             email = str(user_info.get("email", ""))
             full_name_obj = user_info.get("full_name")
@@ -62,17 +79,17 @@ async def get_current_user_from_token(
             realm_roles = user_info.get("realm_roles", [])
             is_admin = "admin" in realm_roles if isinstance(realm_roles, list) else False
 
-            user = User(
+            new_user = User(
                 keycloak_id=keycloak_id,
                 email=email,
                 full_name=full_name,
                 is_admin=is_admin,
             )
-            db.add(user)
+            db.add(new_user)
             await db.commit()
-            await db.refresh(user)
+            await db.refresh(new_user)
 
-        return user
+            return new_user
 
     except JWTError as exc:
         raise HTTPException(

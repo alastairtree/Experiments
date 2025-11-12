@@ -23,15 +23,15 @@ const keycloakConfig = {
 
 declare global {
     // Note the capital "W"
-    interface Window { __kc_init: any; }
+    interface Window { __kc: any; }
 }
 // HACK to force single instance of Keycloak
-window.__kc_init = window.__kc_init || {};
-if (!window.__kc_init.kc) {
+window.__kc = window.__kc || {};
+if (!window.__kc.kc) {
   console.log('🔐 [AuthContext] Initializing Keycloak instance...')
-  window.__kc_init.kc = new Keycloak(keycloakConfig)
+  window.__kc.kc = new Keycloak(keycloakConfig)
 }
-const kc = window.__kc_init.kc;
+const kc = window.__kc.kc;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -98,10 +98,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         await timeout(2000); // Wait for 1 second to ensure Keycloak is ready
         const authenticated = await kc.init({
-          onLoad: 'login-required',
-          pkceMethod: 'S256',
+          //onLoad: 'login-required', // login right now if needed
+          onLoad: 'check-sso', // check if logged in, but don't force login
+          //pkceMethod: 'S256',
           //checkLoginIframe: false,
           enableLogging: true, // Enable Keycloak's internal logging
+          silentCheckSsoRedirectUri: `${location.origin}/silent-check-sso.html`,
+          silentCheckSsoFallback: false
         })
 
         console.log('🔐 [AuthContext] kc.init() completed. Authenticated:', authenticated)

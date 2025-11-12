@@ -25,7 +25,7 @@ def upgrade() -> None:
     op.create_table(
         "users",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("keycloak_id", sa.String(length=255), nullable=False),
+        sa.Column("keycloak_id", sa.String(length=255), nullable=True),
         sa.Column("email", sa.String(length=255), nullable=False),
         sa.Column("full_name", sa.String(length=255), nullable=True),
         sa.Column("is_admin", sa.Boolean(), nullable=False, server_default=sa.text("false")),

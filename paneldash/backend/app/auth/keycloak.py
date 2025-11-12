@@ -15,11 +15,11 @@ class KeycloakAuth:
         self.server_url = settings.keycloak_server_url
         self.realm = settings.keycloak_realm
         self.client_id = settings.keycloak_client_id
-        self._public_key: str | None = None
+        self._public_key: list[str] = []
 
-    async def get_public_key(self) -> str:
+    async def get_public_keys(self) -> list[str]:
         """Fetch the public key from Keycloak for JWT validation."""
-        if self._public_key:
+        if len(self._public_key) > 0:
             return self._public_key
 
         certs_url = (
@@ -35,11 +35,12 @@ class KeycloakAuth:
             if keys.get("keys"):
                 # Convert JWK to PEM format
                 from jose.backends import RSAKey
+                for jwk in keys["keys"]:
+                
+                    key = RSAKey(jwk, algorithm="RS256")  # type: ignore[misc]
+                    self._public_key.append(key.to_pem().decode("utf-8"))
 
-                jwk = keys["keys"][0]
-                key = RSAKey(jwk, algorithm="RS256")  # type: ignore[misc]
-                self._public_key = key.to_pem().decode("utf-8")
-                return self._public_key
+            return self._public_key
 
         raise ValueError("No public key found in Keycloak")
 
@@ -56,24 +57,32 @@ class KeycloakAuth:
         Raises:
             JWTError: If token is invalid or expired
         """
-        try:
-            public_key = await self.get_public_key()
+        public_keys = await self.get_public_keys()
 
-            # Decode and verify the token
-            payload: dict[str, object] = jwt.decode(
-                token,
-                public_key,
-                algorithms=["RS256"],
-                audience=self.client_id,
-                options={"verify_aud": True, "verify_exp": True},
-            )
+        last_error: Exception | None = None
+        # Try each public key until one works
+        for public_key in public_keys:
+            try:
+                # Decode and verify the token
+                payload: dict[str, object] = jwt.decode(
+                    token,
+                    public_key,
+                    algorithms=["RS256"],
+                    audience=self.client_id,
+                    options={"verify_aud": True, "verify_exp": True},
+                )
 
-            return payload
+                return payload
 
-        except ExpiredSignatureError as exc:
-            raise JWTError("Token has expired") from exc
-        except JWTError as exc:
-            raise JWTError(f"Invalid token: {exc}") from exc
+            except ExpiredSignatureError as exc:
+                last_error = JWTError("Token has expired", exc)
+            except JWTError as exc:
+                last_error = JWTError(f"Invalid token: {exc}", exc)
+
+        if last_error:
+            raise last_error
+        
+        raise JWTError("Failed to verify token with any public key")
 
     def extract_user_info(self, token_payload: dict[str, object]) -> dict[str, object]:
         """

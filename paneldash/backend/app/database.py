@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import settings
+import logging
 
+logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """Manages database connections for central and tenant databases."""
@@ -26,6 +28,9 @@ class DatabaseManager:
     def get_central_engine(self) -> AsyncEngine:
         """Get or create the central database engine."""
         if self._central_engine is None:
+
+            logger.debug("Creating central database engine with URL: %s", settings.central_database_url)
+
             self._central_engine = create_async_engine(
                 settings.central_database_url,
                 echo=settings.debug,

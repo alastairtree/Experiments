@@ -29,6 +29,7 @@ import os
 import signal
 import subprocess
 import sys
+from threading import Thread
 import time
 from pathlib import Path
 from tempfile import mkdtemp
@@ -51,7 +52,7 @@ KEYCLOAK_WHEEL = KEYCLOAK_DIR / "dist" / "pytest_keycloak_fixture-0.1.0-py3-none
 
 # Process tracking
 processes = []
-
+_output_thread: Optional[Thread] = None
 
 def cleanup_processes():
     """Clean up all spawned processes on exit."""
@@ -379,6 +380,19 @@ def seed_database(db_info):
         logger.warning("   Continuing anyway...")
 
 
+def _read_output(pipe, prefix: str = "") -> None:
+    try:
+        for line in iter(pipe.readline, b""):
+            if line:
+                decoded = line.decode("utf-8", errors="replace").rstrip()
+                if decoded:
+                    logger.info(f"{prefix}{decoded}")
+    except Exception as e:
+        logger.debug(f"Error reading output: {e}")
+    finally:
+        pipe.close()
+
+
 def start_backend(db_info, keycloak_port: int = 8080):
     """Start the backend API server."""
     logger.info("🚀 Starting backend API...")
@@ -401,14 +415,22 @@ def start_backend(db_info, keycloak_port: int = 8080):
 
     # Start uvicorn
     proc = subprocess.Popen(
-        ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"],
+        ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload", "--log-level=debug"],
         cwd=BACKEND_DIR,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
+        #text=True,
         bufsize=1,
     )
+
+    # Start thread to read and log output
+    _output_thread = Thread(
+        target=_read_output,
+        args=(proc.stdout, "[backend] "),
+        daemon=True,
+    )
+    _output_thread.start()
 
     processes.append((proc, "Backend API"))
 
@@ -507,6 +529,10 @@ def monitor_processes():
                     sys.exit(1)
     except KeyboardInterrupt:
         logger.info("\n🛑 Shutting down...")
+        if _output_thread and _output_thread.is_alive():
+                _output_thread.join(timeout=2)
+        
+        _output_thread = None
 
 
 def main():
