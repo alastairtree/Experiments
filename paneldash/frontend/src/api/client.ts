@@ -23,6 +23,12 @@ export interface Tenant {
 export interface DashboardPanelReference {
   id: string
   config_file: string
+  position?: {
+    row: number
+    col: number
+    width: number
+    height: number
+  }
 }
 
 export interface Dashboard {
