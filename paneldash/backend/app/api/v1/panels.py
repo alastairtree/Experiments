@@ -1,15 +1,17 @@
 """API endpoints for panel data retrieval."""
 
+import asyncio
+import logging
 from datetime import datetime
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import CurrentUser
-from app.database import get_central_db
+from app.database import db_manager, get_central_db
 from app.models.central import Tenant, UserTenant
 from app.schemas.config import (
     HealthStatusPanelConfig,
@@ -26,6 +28,8 @@ from app.services.config_loader import (
 )
 from app.services.data_aggregator import DataAggregator, get_data_aggregator
 from app.services.query_builder import QueryBuilder, get_query_builder
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -151,14 +155,15 @@ async def get_panel_data(
             disable_aggregation,
             query_builder,
             aggregator,
+            tenant,
         )
     elif isinstance(panel_config, KPIPanelConfig):
-        return await _get_kpi_data(panel_id, panel_config, query_builder)
+        return await _get_kpi_data(panel_id, panel_config, query_builder, tenant)
     elif isinstance(panel_config, HealthStatusPanelConfig):
-        return await _get_health_status_data(panel_id, panel_config, query_builder)
+        return await _get_health_status_data(panel_id, panel_config, query_builder, tenant)
     elif isinstance(panel_config, TablePanelConfig):
         return await _get_table_data(
-            panel_id, panel_config, sort_column, sort_order, page, query_builder
+            panel_id, panel_config, sort_column, sort_order, page, query_builder, tenant
         )
     else:
         raise HTTPException(
@@ -175,6 +180,7 @@ async def _get_timeseries_data(
     disable_aggregation: bool,
     query_builder: QueryBuilder,
     aggregator: DataAggregator,
+    tenant: Tenant,
 ) -> PanelDataResponse:
     """Get time series panel data.
 
@@ -186,6 +192,7 @@ async def _get_timeseries_data(
         disable_aggregation: Disable aggregation flag
         query_builder: Query builder
         aggregator: Data aggregator
+        tenant: Tenant object with database connection info
 
     Returns:
         Panel data response with time series data
@@ -193,18 +200,62 @@ async def _get_timeseries_data(
     # Build query
     query, params = query_builder.build_time_series_query(config, date_from, date_to)
 
-    # Mock data for now (in real implementation, query tenant database)
-    # This is a placeholder until database connection is established
-    mock_data = {
-        "series": [
-            {
-                "timestamps": ["2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"],
-                "values": [45.2, 52.1],
-                "label": "server-1",
-            }
-        ],
-        "query_executed": query,
-    }
+    logger.info(f"Executing timeseries query for panel {panel_id}, tenant {tenant.tenant_id}")
+
+    try:
+        # Execute query against tenant database with timeout
+        async with asyncio.timeout(20):
+            async with db_manager.get_tenant_session(tenant.database_url) as session:
+                result = await session.execute(text(query), params)
+                rows = result.fetchall()
+
+        logger.debug(f"Query returned {len(rows)} rows for panel {panel_id}")
+
+        # Transform results into series format
+        # Group by series_label if present
+        series_data: dict[str, dict[str, list]] = {}
+
+        for row in rows:
+            # Convert row to dict
+            row_dict = row._mapping
+
+            timestamp = row_dict["timestamp"]
+            value = float(row_dict["value"]) if row_dict["value"] is not None else None
+            series_label = row_dict.get("series_label", "default")
+
+            if series_label not in series_data:
+                series_data[series_label] = {
+                    "timestamps": [],
+                    "values": [],
+                    "label": series_label,
+                }
+
+            series_data[series_label]["timestamps"].append(timestamp.isoformat())
+            series_data[series_label]["values"].append(value)
+
+        # Convert to list format
+        series_list = list(series_data.values())
+
+        data = {
+            "series": series_list,
+            "query_executed": query,
+        }
+
+    except asyncio.TimeoutError:
+        logger.error(f"Query timeout for panel {panel_id}, tenant {tenant.tenant_id}")
+        raise HTTPException(
+            status_code=504,
+            detail="Database query timed out after 20 seconds",
+        )
+    except Exception as e:
+        logger.error(
+            f"Database error for panel {panel_id}, tenant {tenant.tenant_id}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to query tenant database: {str(e)}",
+        )
 
     # Determine aggregation info
     aggregation_info = None
@@ -229,13 +280,16 @@ async def _get_timeseries_data(
     return PanelDataResponse(
         panel_id=panel_id,
         panel_type=PanelType.TIMESERIES,
-        data=mock_data,
+        data=data,
         aggregation_info=aggregation_info,
     )
 
 
 async def _get_kpi_data(
-    panel_id: str, config: KPIPanelConfig, query_builder: QueryBuilder
+    panel_id: str,
+    config: KPIPanelConfig,
+    query_builder: QueryBuilder,
+    tenant: Tenant,
 ) -> PanelDataResponse:
     """Get KPI panel data.
 
@@ -243,6 +297,7 @@ async def _get_kpi_data(
         panel_id: Panel identifier
         config: KPI panel configuration
         query_builder: Query builder
+        tenant: Tenant object with database connection info
 
     Returns:
         Panel data response with KPI value and threshold status
@@ -250,20 +305,50 @@ async def _get_kpi_data(
     # Build query
     query, params = query_builder.build_kpi_query(config)
 
-    # Mock data (in real implementation, query tenant database)
-    mock_value = 75.3
+    logger.info(f"Executing KPI query for panel {panel_id}, tenant {tenant.tenant_id}")
+
+    try:
+        # Execute query against tenant database with timeout
+        async with asyncio.timeout(20):
+            async with db_manager.get_tenant_session(tenant.database_url) as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+
+        # Extract value (default to None if no result)
+        value = None
+        if row is not None:
+            row_dict = row._mapping
+            value = float(row_dict["value"]) if row_dict["value"] is not None else None
+
+        logger.debug(f"KPI query returned value {value} for panel {panel_id}")
+
+    except asyncio.TimeoutError:
+        logger.error(f"Query timeout for panel {panel_id}, tenant {tenant.tenant_id}")
+        raise HTTPException(
+            status_code=504,
+            detail="Database query timed out after 20 seconds",
+        )
+    except Exception as e:
+        logger.error(
+            f"Database error for panel {panel_id}, tenant {tenant.tenant_id}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to query tenant database: {str(e)}",
+        )
 
     # Apply threshold logic
     threshold_status = "good"
     threshold_color = "#10B981"  # Default green
 
-    if config.display and config.display.thresholds:
+    if value is not None and config.display and config.display.thresholds:
         # Find applicable threshold (highest threshold value <= current value)
         applicable_threshold = None
         for threshold in sorted(
             config.display.thresholds, key=lambda t: t.value, reverse=True
         ):
-            if mock_value >= threshold.value:
+            if value >= threshold.value:
                 applicable_threshold = threshold
                 break
 
@@ -271,8 +356,8 @@ async def _get_kpi_data(
             threshold_status = applicable_threshold.label
             threshold_color = applicable_threshold.color
 
-    mock_data = {
-        "value": mock_value,
+    data = {
+        "value": value,
         "unit": config.display.unit if config.display else None,
         "decimals": config.display.decimals if config.display else 1,
         "threshold_status": threshold_status,
@@ -283,12 +368,15 @@ async def _get_kpi_data(
     return PanelDataResponse(
         panel_id=panel_id,
         panel_type=PanelType.KPI,
-        data=mock_data,
+        data=data,
     )
 
 
 async def _get_health_status_data(
-    panel_id: str, config: HealthStatusPanelConfig, query_builder: QueryBuilder
+    panel_id: str,
+    config: HealthStatusPanelConfig,
+    query_builder: QueryBuilder,
+    tenant: Tenant,
 ) -> PanelDataResponse:
     """Get health status panel data.
 
@@ -296,6 +384,7 @@ async def _get_health_status_data(
         panel_id: Panel identifier
         config: Health status panel configuration
         query_builder: Query builder
+        tenant: Tenant object with database connection info
 
     Returns:
         Panel data response with service statuses
@@ -303,46 +392,71 @@ async def _get_health_status_data(
     # Build query
     query, params = query_builder.build_health_status_query(config)
 
-    # Mock data (in real implementation, query tenant database)
-    mock_services = [
-        {"service_name": "api", "status_value": 0},
-        {"service_name": "database", "status_value": 0},
-        {"service_name": "cache", "status_value": 1},
-    ]
+    logger.info(f"Executing health status query for panel {panel_id}, tenant {tenant.tenant_id}")
 
-    # Apply status mapping
-    services_with_status = []
-    for service in mock_services:
-        status_value = cast(int, service["status_value"])
-        if status_value in config.display.status_mapping:
-            mapping = config.display.status_mapping[status_value]
-            services_with_status.append(
-                {
-                    "service_name": service["service_name"],
-                    "status_value": status_value,
-                    "status_label": mapping.label,
-                    "status_color": mapping.color,
-                }
-            )
-        else:
-            services_with_status.append(
-                {
-                    "service_name": service["service_name"],
-                    "status_value": status_value,
-                    "status_label": "unknown",
-                    "status_color": "#6B7280",  # Gray
-                }
-            )
+    try:
+        # Execute query against tenant database with timeout
+        async with asyncio.timeout(20):
+            async with db_manager.get_tenant_session(tenant.database_url) as session:
+                result = await session.execute(text(query), params)
+                rows = result.fetchall()
 
-    mock_data = {
-        "services": services_with_status,
-        "query_executed": query,
-    }
+        logger.debug(f"Health status query returned {len(rows)} services for panel {panel_id}")
+
+        # Transform results
+        services_with_status = []
+        for row in rows:
+            row_dict = row._mapping
+            service_name = row_dict["service_name"]
+            status_value = cast(int, row_dict["status_value"])
+
+            # Apply status mapping
+            if status_value in config.display.status_mapping:
+                mapping = config.display.status_mapping[status_value]
+                services_with_status.append(
+                    {
+                        "service_name": service_name,
+                        "status_value": status_value,
+                        "status_label": mapping.label,
+                        "status_color": mapping.color,
+                    }
+                )
+            else:
+                # Unknown status value - use default
+                services_with_status.append(
+                    {
+                        "service_name": service_name,
+                        "status_value": status_value,
+                        "status_label": "unknown",
+                        "status_color": "#6B7280",  # Gray
+                    }
+                )
+
+        data = {
+            "services": services_with_status,
+            "query_executed": query,
+        }
+
+    except asyncio.TimeoutError:
+        logger.error(f"Query timeout for panel {panel_id}, tenant {tenant.tenant_id}")
+        raise HTTPException(
+            status_code=504,
+            detail="Database query timed out after 20 seconds",
+        )
+    except Exception as e:
+        logger.error(
+            f"Database error for panel {panel_id}, tenant {tenant.tenant_id}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to query tenant database: {str(e)}",
+        )
 
     return PanelDataResponse(
         panel_id=panel_id,
         panel_type=PanelType.HEALTH_STATUS,
-        data=mock_data,
+        data=data,
     )
 
 
@@ -353,6 +467,7 @@ async def _get_table_data(
     sort_order: str,
     page: int,
     query_builder: QueryBuilder,
+    tenant: Tenant,
 ) -> PanelDataResponse:
     """Get table panel data.
 
@@ -363,6 +478,7 @@ async def _get_table_data(
         sort_order: Sort order
         page: Page number
         query_builder: Query builder
+        tenant: Tenant object with database connection info
 
     Returns:
         Panel data response with tabular data and pagination info
@@ -372,34 +488,88 @@ async def _get_table_data(
         config, sort_column, sort_order, page
     )
 
-    # Mock data (in real implementation, query tenant database)
-    page_size = config.display.pagination if config.display else 25
-    mock_rows = [
-        {"timestamp": "2024-01-01T12:00:00Z", "message": "Error in API", "severity": "ERROR"},
-        {"timestamp": "2024-01-01T11:30:00Z", "message": "DB connection lost", "severity": "CRITICAL"},
-    ]
+    logger.info(f"Executing table query for panel {panel_id}, tenant {tenant.tenant_id}")
 
-    mock_data = {
-        "columns": [
-            {"name": col.name, "display": col.display, "format": col.format}
-            for col in config.data_source.columns
-        ],
-        "rows": mock_rows,
-        "pagination": {
-            "current_page": page,
-            "page_size": page_size,
-            "total_rows": 50,  # Mock total
-            "total_pages": 2,
-        },
-        "sort": {
-            "column": sort_column or (config.display.default_sort if config.display else None),
-            "order": sort_order,
-        },
-        "query_executed": query,
-    }
+    try:
+        # Execute query against tenant database with timeout
+        async with asyncio.timeout(20):
+            async with db_manager.get_tenant_session(tenant.database_url) as session:
+                # Execute data query
+                result = await session.execute(text(query), params)
+                rows_raw = result.fetchall()
+
+                # Build count query (remove LIMIT/OFFSET for count)
+                # Extract base query (everything before ORDER BY)
+                count_query = query.split(" ORDER BY")[0]
+                count_query = f"SELECT COUNT(*) as total FROM ({count_query}) as subq"
+
+                # Execute count query
+                count_result = await session.execute(text(count_query), params)
+                count_row = count_result.fetchone()
+                total_rows = int(count_row._mapping["total"]) if count_row else 0
+
+        logger.debug(f"Table query returned {len(rows_raw)} rows (total: {total_rows}) for panel {panel_id}")
+
+        # Transform results to list of dicts
+        rows = []
+        for row in rows_raw:
+            row_dict = {}
+            row_mapping = row._mapping
+
+            for col in config.data_source.columns:
+                value = row_mapping.get(col.name)
+
+                # Format based on column format
+                if col.format == "datetime" and isinstance(value, datetime):
+                    row_dict[col.name] = value.isoformat()
+                elif value is not None:
+                    row_dict[col.name] = value
+                else:
+                    row_dict[col.name] = None
+
+            rows.append(row_dict)
+
+        # Build pagination metadata
+        page_size = config.display.pagination if config.display else 25
+        total_pages = (total_rows + page_size - 1) // page_size  # Ceiling division
+
+        data = {
+            "columns": [
+                {"name": col.name, "display": col.display, "format": col.format}
+                for col in config.data_source.columns
+            ],
+            "rows": rows,
+            "pagination": {
+                "current_page": page,
+                "page_size": page_size,
+                "total_rows": total_rows,
+                "total_pages": total_pages,
+            },
+            "sort": {
+                "column": sort_column or (config.display.default_sort if config.display else None),
+                "order": sort_order,
+            },
+            "query_executed": query,
+        }
+
+    except asyncio.TimeoutError:
+        logger.error(f"Query timeout for panel {panel_id}, tenant {tenant.tenant_id}")
+        raise HTTPException(
+            status_code=504,
+            detail="Database query timed out after 20 seconds",
+        )
+    except Exception as e:
+        logger.error(
+            f"Database error for panel {panel_id}, tenant {tenant.tenant_id}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to query tenant database: {str(e)}",
+        )
 
     return PanelDataResponse(
         panel_id=panel_id,
         panel_type=PanelType.TABLE,
-        data=mock_data,
+        data=data,
     )
