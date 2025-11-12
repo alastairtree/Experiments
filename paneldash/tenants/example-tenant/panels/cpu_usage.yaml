@@ -1,6 +1,6 @@
 panel:
   type: "timeseries"
-  title: "CPU Usage Over Time"
+  title: "api-server-1 CPU Usage Over Time"
   description: "Server CPU utilization percentage"
 
   data_source:
@@ -11,7 +11,7 @@ panel:
       series_label: "server_name"  # Optional: multiple lines
 
     query:
-      where: "metric_type = 'cpu'"
+      where: "server_name = 'api-server-1'"
       order_by: "recorded_at DESC"
 
   display:

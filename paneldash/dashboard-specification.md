@@ -325,14 +325,14 @@ panel:
   title: "Recent Errors"
   
   data_source:
-    table: "error_logs"
+    table: "logs"
     columns:
       - name: "timestamp"
         display: "Time"
         format: "datetime"
       - name: "service"
         display: "Service"
-      - name: "error_message"
+      - name: "message"
         display: "Error"
       - name: "severity"
         display: "Severity"

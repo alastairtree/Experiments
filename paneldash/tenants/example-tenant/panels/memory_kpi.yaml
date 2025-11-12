@@ -1,12 +1,12 @@
 panel:
   type: "kpi"
-  title: "Current Memory Usage"
+  title: "web-server-1 Current Memory Usage"
 
   data_source:
     table: "metrics"
     columns:
       value: "memory_percent"
-    query: "metric_type = 'memory' ORDER BY recorded_at DESC LIMIT 1"
+    query: "server_name = 'web-server-1' ORDER BY recorded_at DESC LIMIT 1"
 
   display:
     unit: "%"

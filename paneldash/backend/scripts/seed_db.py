@@ -202,7 +202,8 @@ async def seed_database() -> None:
         example_tenant = Tenant(
             tenant_id="example-tenant",
             name="Example Tenant",
-            database_name="tenant_example",
+            # reuse the main app db for the demo tenant
+            database_name=settings.central_db_name, #"tenant_example",
             database_host=settings.central_db_host,
             database_port=settings.central_db_port,
             database_user=settings.central_db_user,

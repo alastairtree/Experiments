@@ -2,6 +2,7 @@
 
 import re
 from datetime import datetime
+from datetime import timezone
 from typing import Any
 
 from app.schemas.config import (
@@ -123,12 +124,12 @@ class QueryBuilder:
 
         # Add date range filters
         if date_from is not None:
-            where_conditions.append(f"{self._quote_identifier(columns['timestamp'])} >= %(date_from)s")
-            params["date_from"] = date_from
+            where_conditions.append(f"{self._quote_identifier(columns['timestamp'])} >= :date_from")
+            params["date_from"] = date_from.astimezone(timezone.utc).replace(tzinfo=None)
 
         if date_to is not None:
-            where_conditions.append(f"{self._quote_identifier(columns['timestamp'])} <= %(date_to)s")
-            params["date_to"] = date_to
+            where_conditions.append(f"{self._quote_identifier(columns['timestamp'])} <= :date_to")
+            params["date_to"] = date_to.astimezone(timezone.utc).replace(tzinfo=None)
 
         # Add custom WHERE clause from config
         if config.data_source.query and "where" in config.data_source.query:
@@ -185,7 +186,7 @@ class QueryBuilder:
         # Add custom query clause if provided
         if config.data_source.query:
             # For KPI, the query is a string containing WHERE + ORDER BY + LIMIT
-            query += f" {config.data_source.query}"
+            query += f" WHERE {config.data_source.query}"
 
         params: dict[str, Any] = {}
         return query, params

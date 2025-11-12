@@ -58,10 +58,20 @@ class Tenant(Base):
     @property
     def database_url(self) -> str:
         """Get the database URL for this tenant."""
-        return (
-            f"postgresql+asyncpg://{self.database_user}:{self.database_password}"
-            f"@{self.database_host}:{self.database_port}/{self.database_name}"
-        )
+        # Check if host is a Unix socket path (starts with /)
+        if self.database_host.startswith("/"):
+            # Unix domain socket connection
+            password_part = f":{self.database_password}" if self.database_password else ""
+            return (
+                f"postgresql+asyncpg://{self.database_user}{password_part}@"
+                f"/{self.database_name}?host={self.database_host}"
+            )
+        else:
+            # TCP/IP connection
+            return (
+                f"postgresql+asyncpg://{self.database_user}:{self.database_password}"
+                f"@{self.database_host}:{self.database_port}/{self.database_name}"
+            )
 
 
 class UserTenant(Base):
