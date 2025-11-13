@@ -28,7 +28,8 @@ export interface DashboardPanelReference {
     col: number
     width: number
     height: number
-  }
+  },
+  type: string
 }
 
 export interface Dashboard {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Children, useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTenant } from '../contexts/TenantContext'
 import Header from '../components/Header'
@@ -6,6 +6,10 @@ import DashboardGrid from '../components/DashboardGrid'
 import DateFilter, { DateRange } from '../components/DateFilter'
 import TimeSeriesPanel from '../components/panels/TimeSeriesPanel'
 import { apiClient, Dashboard as DashboardType } from '../api/client'
+import TablePanel from '@/components/panels/TablePanel'
+import { PanelBottom } from 'lucide-react'
+import KPIPanel from '@/components/panels/KPIPanel'
+import HealthStatusPanel from '@/components/panels/HealthStatusPanel'
 
 export default function Dashboard() {
   const { user: _user } = useAuth()
@@ -90,14 +94,51 @@ export default function Dashboard() {
                   panels={dashboard.panels}
                   columns={dashboard.layout?.columns || 12}
                 >
-                  {panelRef => (
-                    <TimeSeriesPanel
-                      panelId={panelRef.id}
-                      tenantId={selectedTenant.tenant_id}
-                      dateRange={dateRange}
-                      title={panelRef.id}
-                    />
-                  )}
+                  { 
+                  panelRef => {
+                    if (panelRef.type === 'timeseries') {
+                      return (
+                        <TimeSeriesPanel
+                          panelId={panelRef.id}
+                          tenantId={selectedTenant.tenant_id}
+                          dateRange={dateRange}
+                          title={panelRef.id}
+                        />
+                      )
+                    }
+                    if (panelRef.type === 'table') {
+                      return (
+                        <TablePanel
+                          panelId={panelRef.id}
+                          tenantId={selectedTenant.tenant_id}
+                          dateRange={dateRange}
+                          title={panelRef.id}
+                        />
+                      )
+                    }
+                    if (panelRef.type === 'kpi') {
+                      return 
+                        <KPIPanel
+                          panelId={panelRef.id}
+                          tenantId={selectedTenant.tenant_id}
+                          dateRange={dateRange}
+                          title={panelRef.id}
+                        />
+                        
+                    }
+                    if (panelRef.type === 'health_status') {
+                      return (
+                        <HealthStatusPanel
+                          panelId={panelRef.id}
+                          tenantId={selectedTenant.tenant_id}
+                          dateRange={dateRange}
+                          title={panelRef.id}
+                        />
+                      )
+                    }
+                    <div>{panelRef.type}  </div>
+                }
+              }
                 </DashboardGrid>
               ) : (
                 <div className="bg-blue-50 border border-blue-200 rounded-md p-4">

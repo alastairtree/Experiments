@@ -144,7 +144,9 @@ async def get_dashboard(
             )
 
     try:
-        dashboard_config = config_loader.load_dashboard_config(tenant_id, dashboard_name)
+        dashboard_config, panels = config_loader.load_dashboard_with_panels(tenant_id, dashboard_name)
+        for panel in dashboard_config.dashboard.panels:
+            panel.type = panels[panel.id].type
     except ConfigNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 

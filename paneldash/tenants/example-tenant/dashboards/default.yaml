@@ -23,7 +23,7 @@ dashboard:
         width: 4
         height: 1
 
-    - id: "system_health"
+    - id: "health_status"
       config_file: "panels/health_status.yaml"
       position:
         row: 2

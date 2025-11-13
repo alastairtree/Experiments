@@ -3,10 +3,10 @@ panel:
   title: "Service Health"
 
   data_source:
-    table: "service_health"
+    table: "health_status"
     columns:
       service_name: "name"
-      status_value: "last_check_status"
+      status_value: "last_check"
       timestamp: "last_checked_at"
 
   display:

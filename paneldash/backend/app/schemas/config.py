@@ -211,6 +211,7 @@ class DashboardPanelReference(BaseModel):
     id: str
     config_file: str  # Path to panel YAML file
     position: PanelPosition
+    type: PanelType | None = None  # will be populated for API clients
 
 
 class DashboardLayout(BaseModel):

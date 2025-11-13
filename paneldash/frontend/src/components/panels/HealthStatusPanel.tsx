@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { apiClient, PanelData } from '../../api/client'
+import { DateRange } from '../DateFilter'
 
 interface HealthStatusPanelProps {
   panelId: string
   tenantId: string
   title?: string
+  dateRange: DateRange
 }
 
 interface ServiceStatus {
@@ -33,9 +35,7 @@ interface HealthStatusData {
  * - Loading and error states
  */
 export default function HealthStatusPanel({
-  panelId,
-  tenantId,
-  title,
+  panelId, tenantId, dateRange, 
 }: HealthStatusPanelProps) {
   const [data, setData] = useState<PanelData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -49,6 +49,11 @@ export default function HealthStatusPanel({
       setError(null)
 
       try {
+        const fetchParams = {
+          date_from: dateRange.from?.toISOString(),
+          date_to: dateRange.to?.toISOString(),
+          disable_aggregation: true,
+        }
         const panelData = await apiClient.getPanelData(tenantId, panelId)
         setData(panelData)
       } catch (err) {
@@ -136,7 +141,7 @@ export default function HealthStatusPanel({
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
-      {title && <h3 className="text-lg font-medium text-gray-900 mb-4">{title}</h3>}
+      {data.title && <h3 className="text-lg font-medium text-gray-900 mb-4">{data.title}</h3>}
 
       {healthData.services.length === 0 ? (
         <p className="text-sm text-gray-500 text-center py-8">No services to display</p>
