@@ -11,26 +11,19 @@ echo ""
 # Database configuration
 DB_NAME="example"
 TABLE_NAME="users"
-PORT="5432"
-
-# Check if postgres user exists, if not create it
-echo "Step 1: Ensuring postgres superuser exists..."
-psql -U claude -d postgres -p $PORT -c "SELECT 1" >/dev/null 2>&1 || {
-    echo "Creating postgres superuser role..."
-    createuser -U claude -p $PORT -s postgres 2>/dev/null || echo "Superuser setup skipped"
-}
+DB_USER="postgres"
 
 # Drop database if it exists (for clean setup)
-echo "Step 2: Dropping existing database if it exists..."
-psql -U claude -d postgres -p $PORT -c "DROP DATABASE IF EXISTS $DB_NAME;" 2>/dev/null || true
+echo "Step 1: Dropping existing database if it exists..."
+psql -U $DB_USER -d postgres -c "DROP DATABASE IF EXISTS $DB_NAME;" 2>/dev/null || true
 
 # Create database
-echo "Step 3: Creating database '$DB_NAME'..."
-psql -U claude -d postgres -p $PORT -c "CREATE DATABASE $DB_NAME;"
+echo "Step 2: Creating database '$DB_NAME'..."
+psql -U $DB_USER -d postgres -c "CREATE DATABASE $DB_NAME;"
 
 # Create table
-echo "Step 4: Creating table '$TABLE_NAME'..."
-psql -U claude -d $DB_NAME -p $PORT <<EOF
+echo "Step 3: Creating table '$TABLE_NAME'..."
+psql -U $DB_USER -d $DB_NAME <<EOF
 CREATE TABLE $TABLE_NAME (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -40,8 +33,8 @@ CREATE TABLE $TABLE_NAME (
 EOF
 
 # Insert sample data
-echo "Step 5: Inserting sample data..."
-psql -U claude -d $DB_NAME -p $PORT <<EOF
+echo "Step 4: Inserting sample data..."
+psql -U $DB_USER -d $DB_NAME <<EOF
 INSERT INTO $TABLE_NAME (name, email) VALUES
     ('Alice Smith', 'alice@example.com'),
     ('Bob Johnson', 'bob@example.com'),
@@ -50,15 +43,14 @@ EOF
 
 # Query and display the data
 echo ""
-echo "Step 6: Verifying data insertion..."
+echo "Step 5: Verifying data insertion..."
 echo "=== Current data in $TABLE_NAME table ==="
-psql -U claude -d $DB_NAME -p $PORT -c "SELECT * FROM $TABLE_NAME ORDER BY id;"
+psql -U $DB_USER -d $DB_NAME -c "SELECT * FROM $TABLE_NAME ORDER BY id;"
 
 echo ""
 echo "=== Database setup complete! ==="
 echo "Database: $DB_NAME"
 echo "Table: $TABLE_NAME"
-echo "Port: $PORT"
 echo ""
 echo "To query the database manually, run:"
-echo "  psql -U claude -d $DB_NAME -p $PORT"
+echo "  psql -U $DB_USER -d $DB_NAME"
