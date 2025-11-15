@@ -2,11 +2,11 @@
 
 This document describes the minimal configuration steps needed to set up PostgreSQL for local development.
 
-## Minimal Setup Steps
+## Minimal Setup (One Configuration Change)
 
-### 1. Configure Authentication for postgres User
+### 1. Configure Trust Authentication for postgres User
 
-Edit `/etc/postgresql/16/main/pg_hba.conf` and change the postgres user authentication method:
+Edit `/etc/postgresql/16/main/pg_hba.conf` and change ONLY the postgres user line:
 
 Change this line:
 ```
@@ -18,10 +18,15 @@ To:
 local   all             postgres                                trust
 ```
 
-**Why:** This allows any local user to connect as the postgres database user without password authentication. This is the only configuration change needed.
+**Why:** This allows connecting as the `postgres` database user from any local system user, while keeping peer authentication (the default) for all other users. This is the smallest configuration change needed.
 
-### 2. Start PostgreSQL Service
+### 2. Reload PostgreSQL Configuration
 
+```bash
+pg_ctlcluster 16 main reload
+```
+
+Or if PostgreSQL isn't running, start it:
 ```bash
 pg_ctlcluster 16 main start
 ```
@@ -34,7 +39,7 @@ Check that PostgreSQL is running:
 pg_lsclusters
 ```
 
-Test connection:
+Test connection as postgres user:
 ```bash
 psql -U postgres -d postgres -c "SELECT version();"
 ```
