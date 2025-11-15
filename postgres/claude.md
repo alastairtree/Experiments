@@ -1,65 +1,29 @@
 # PostgreSQL Setup Documentation
 
-This document describes the configuration steps needed to set up PostgreSQL for local development.
+This document describes the minimal configuration steps needed to set up PostgreSQL for local development.
 
-## Initial Setup Steps
+## Minimal Setup Steps
 
-### 1. Fix SSL Certificate Permissions
+### 1. Configure Authentication for postgres User
 
-The PostgreSQL server requires strict permissions on the SSL key file:
+Edit `/etc/postgresql/16/main/pg_hba.conf` and change the postgres user authentication method:
 
-```bash
-chmod 0600 /etc/ssl/private/ssl-cert-snakeoil.key
-```
-
-**Why:** PostgreSQL won't start if the private key file has group or world access permissions.
-
-### 2. Configure Authentication Method
-
-Modified `/etc/postgresql/16/main/pg_hba.conf` to allow local connections without password:
-
-Changed from:
+Change this line:
 ```
 local   all             postgres                                peer
-local   all             all                                     peer
 ```
 
 To:
 ```
 local   all             postgres                                trust
-local   all             all                                     trust
 ```
 
-**Why:** "peer" authentication requires the system username to match the PostgreSQL username. Using "trust" allows connections from any local user without authentication (safe for local development).
+**Why:** This allows any local user to connect as the postgres database user without password authentication. This is the only configuration change needed.
 
-### 3. Fix pg_hba.conf File Permissions
-
-```bash
-chmod 644 /etc/postgresql/16/main/pg_hba.conf
-chown claude:ubuntu /etc/postgresql/16/main/pg_hba.conf
-```
-
-**Why:** PostgreSQL needs to read the configuration file, and the file ownership/permissions need to be correct.
-
-### 4. Create PostgreSQL User
-
-Created a superuser role for the "claude" system user:
-
-```bash
-psql -U postgres -d postgres -p 5432 -c "CREATE USER claude WITH SUPERUSER CREATEDB CREATEROLE LOGIN;"
-```
-
-**Why:** This allows the "claude" system user to connect to PostgreSQL and create databases.
-
-### 5. Start PostgreSQL Service
+### 2. Start PostgreSQL Service
 
 ```bash
 pg_ctlcluster 16 main start
-```
-
-To reload configuration without restart:
-```bash
-pg_ctlcluster 16 main reload
 ```
 
 ## Verification
@@ -70,15 +34,9 @@ Check that PostgreSQL is running:
 pg_lsclusters
 ```
 
-Expected output:
-```
-Ver Cluster Port Status Owner  Data directory              Log file
-16  main    5432 online claude /var/lib/postgresql/16/main /var/log/postgresql/postgresql-16-main.log
-```
-
 Test connection:
 ```bash
-psql -U claude -d postgres -p 5432 -c "SELECT version();"
+psql -U postgres -d postgres -c "SELECT version();"
 ```
 
 ## Using the Setup Script
@@ -99,7 +57,7 @@ This script will:
 Connect to the example database:
 
 ```bash
-psql -U claude -d example -p 5432
+psql -U postgres -d example
 ```
 
 Common psql commands:
