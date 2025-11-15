@@ -2,6 +2,7 @@
 
 # PostgreSQL Database Setup Script
 # This script creates a database called 'example' with a simple table and sample data
+# Connects as the 'postgres' database user
 
 set -e  # Exit on error
 
