@@ -2,7 +2,8 @@
 
 # PostgreSQL Database Setup Script
 # This script creates a database called 'example' with a simple table and sample data
-# Connects as the 'postgres' database user
+# By default uses the current OS user (works with peer authentication)
+# Set DB_USER environment variable to override (e.g., DB_USER=postgres ./setup_database.sh)
 
 set -e  # Exit on error
 
@@ -12,7 +13,10 @@ echo ""
 # Database configuration
 DB_NAME="example"
 TABLE_NAME="users"
-DB_USER="postgres"
+DB_USER="${DB_USER:-$(whoami)}"  # Default to current user, can be overridden
+
+echo "Connecting as database user: $DB_USER"
+echo ""
 
 # Drop database if it exists (for clean setup)
 echo "Step 1: Dropping existing database if it exists..."
