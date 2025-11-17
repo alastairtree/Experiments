@@ -1,0 +1,132 @@
+services:
+  # PostgreSQL - Central Database
+  postgres-central:
+    image: postgres:16-alpine
+    container_name: paneldash-postgres-central
+    environment:
+      POSTGRES_DB: paneldash_central
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-central-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - paneldash
+
+  # PostgreSQL - Tenant Database (example)
+  postgres-tenant:
+    image: postgres:16-alpine
+    container_name: paneldash-postgres-tenant
+    environment:
+      POSTGRES_DB: tenant_alpha
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-tenant-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - paneldash
+
+  # Keycloak
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: paneldash-keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres-central:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: postgres
+      KC_HOSTNAME_STRICT: false
+      KC_HTTP_ENABLED: true
+      KC_HEALTH_ENABLED: true
+      KC_HOSTNAME: "http://localhost:8080"
+    command: start-dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres-central:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', '[ -f /tmp/HealthCheck.java ] || echo "public class HealthCheck { public static void main(String[] args) throws java.lang.Throwable { java.net.URI uri = java.net.URI.create(args[0]); System.exit(java.net.HttpURLConnection.HTTP_OK == ((java.net.HttpURLConnection)uri.toURL().openConnection()).getResponseCode() ? 0 : 1); } }" > /tmp/HealthCheck.java && java /tmp/HealthCheck.java http://localhost:9000/health/live']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - paneldash
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/backend.Dockerfile
+    container_name: paneldash-backend
+    environment:
+      DEBUG: "true"
+      CENTRAL_DB_HOST: postgres-central
+      CENTRAL_DB_PORT: 5432
+      CENTRAL_DB_NAME: paneldash_central
+      CENTRAL_DB_USER: postgres
+      CENTRAL_DB_PASSWORD: postgres
+      KEYCLOAK_SERVER_URL: http://keycloak:8080
+      KEYCLOAK_REALM: paneldash
+      KEYCLOAK_CLIENT_ID: paneldash-api
+      KEYCLOAK_CLIENT_SECRET: ""
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./config:/app/config
+    depends_on:
+      postgres-central:
+        condition: service_healthy
+      postgres-tenant:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    #command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - paneldash
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
+      target: development
+    container_name: paneldash-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    command: npm run dev -- --host 0.0.0.0
+    networks:
+      - paneldash
+
+volumes:
+  postgres-central-data:
+  postgres-tenant-data:
+
+networks:
+  paneldash:
+    driver: bridge

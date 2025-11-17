@@ -1,0 +1,28 @@
+panel:
+  type: "timeseries"
+  title: "api-server-1 CPU Usage Over Time"
+  description: "Server CPU utilization percentage"
+
+  data_source:
+    table: "metrics"
+    columns:
+      timestamp: "recorded_at"
+      value: "cpu_percent"
+      series_label: "server_name"  # Optional: multiple lines
+
+    query:
+      where: "server_name = 'api-server-1'"
+      order_by: "recorded_at DESC"
+
+  display:
+    y_axis_label: "CPU %"
+    y_axis_range: [0, 100]
+    line_color: "#3B82F6"
+    fill_area: true
+
+  refresh_interval: 300  # 5 minutes
+
+  drill_down:
+    enabled: true
+    show_table: true
+    disable_aggregation: true

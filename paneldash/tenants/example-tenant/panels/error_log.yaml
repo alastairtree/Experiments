@@ -1,0 +1,29 @@
+panel:
+  type: "table"
+  title: "Recent Errors"
+
+  data_source:
+    table: "logs"
+    columns:
+      - name: "timestamp"
+        display: "Time"
+        format: "datetime"
+      - name: "service"
+        display: "Service"
+      - name: "message"
+        display: "Error"
+      - name: "severity"
+        display: "Severity"
+
+    query:
+      where: "severity IN ('ERROR', 'CRITICAL')"
+      order_by: "timestamp DESC"
+      limit: 50
+
+  display:
+    sortable: true
+    default_sort: "timestamp"
+    default_sort_order: "desc"
+    pagination: 25
+
+  refresh_interval: 300
