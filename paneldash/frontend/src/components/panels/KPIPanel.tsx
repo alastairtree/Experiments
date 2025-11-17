@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { apiClient, PanelData } from '../../api/client'
+import { DateRange } from '../DateFilter'
 
 interface KPIPanelProps {
   panelId: string
   tenantId: string
+  dateRange: DateRange
   title?: string
 }
 
@@ -25,7 +27,7 @@ interface KPIData {
  * - Unit and label display
  * - Loading and error states
  */
-export default function KPIPanel({ panelId, tenantId, title }: KPIPanelProps) {
+export default function KPIPanel({ panelId, tenantId, dateRange, title }: KPIPanelProps) {
   const [data, setData] = useState<PanelData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -38,7 +40,12 @@ export default function KPIPanel({ panelId, tenantId, title }: KPIPanelProps) {
       setError(null)
 
       try {
-        const panelData = await apiClient.getPanelData(tenantId, panelId)
+        const fetchParams = {
+          date_from: dateRange.from?.toISOString(),
+          date_to: dateRange.to?.toISOString(),
+          disable_aggregation: true,
+        }
+        const panelData = await apiClient.getPanelData(tenantId, panelId, fetchParams)
         setData(panelData)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load KPI data')

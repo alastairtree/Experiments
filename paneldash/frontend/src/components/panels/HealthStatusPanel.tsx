@@ -55,6 +55,9 @@ export default function HealthStatusPanel({
           disable_aggregation: true,
         }
         const panelData = await apiClient.getPanelData(tenantId, panelId)
+        // TODO: Consider date range in future if needed
+        // const panelData = await apiClient.getPanelData(tenantId, panelId, fetchParams)
+
         setData(panelData)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load health status')
@@ -213,6 +216,7 @@ export default function HealthStatusPanel({
               </div>
             </div>
           ))}
+          <small className="text-gray-400">NOTE: This is the latest data and is not filtered based on the date range.</small>
         </div>
       )}
     </div>

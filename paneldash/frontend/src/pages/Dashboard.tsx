@@ -117,13 +117,14 @@ export default function Dashboard() {
                       )
                     }
                     if (panelRef.type === 'kpi') {
-                      return 
+                      return (
                         <KPIPanel
                           panelId={panelRef.id}
                           tenantId={selectedTenant.tenant_id}
                           dateRange={dateRange}
                           title={panelRef.id}
                         />
+                      )
                         
                     }
                     if (panelRef.type === 'health_status') {
@@ -136,7 +137,6 @@ export default function Dashboard() {
                         />
                       )
                     }
-                    <div>{panelRef.type}  </div>
                 }
               }
                 </DashboardGrid>
