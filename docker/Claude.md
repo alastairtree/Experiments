@@ -106,10 +106,8 @@ Limitations:
 
 ### Files Created
 
-1. **app.py** - Flask web application with 3 endpoints:
+1. **app.py** - Flask web application with 1 endpoint:
    - `/` - Returns hello message with timestamp
-   - `/health` - Health check endpoint
-   - `/api/data` - Returns sample data
 
 2. **requirements.txt** - Python dependencies:
    - Flask==3.0.0
@@ -177,7 +175,7 @@ Container started successfully with ID: `5f795765baed`
 
 Due to networking limitations, tested from inside the container using Python's urllib:
 
-#### Test 1: Root Endpoint (/)
+#### Test: Root Endpoint (/)
 ```bash
 docker exec python-api python -c "import urllib.request; import json; response = urllib.request.urlopen('http://localhost:5000/'); print(json.dumps(json.loads(response.read()), indent=2))"
 ```
@@ -191,54 +189,12 @@ docker exec python-api python -c "import urllib.request; import json; response =
 }
 ```
 
-#### Test 2: Health Endpoint (/health)
-```bash
-docker exec python-api python -c "import urllib.request; import json; response = urllib.request.urlopen('http://localhost:5000/health'); print(json.dumps(json.loads(response.read()), indent=2))"
-```
-
-**Response:**
-```json
-{
-  "service": "python-web-api",
-  "status": "healthy"
-}
-```
-
-#### Test 3: Data Endpoint (/api/data)
-```bash
-docker exec python-api python -c "import urllib.request; import json; response = urllib.request.urlopen('http://localhost:5000/api/data'); print(json.dumps(json.loads(response.read()), indent=2))"
-```
-
-**Response:**
-```json
-{
-  "count": 3,
-  "items": [
-    {
-      "id": 1,
-      "name": "Docker",
-      "type": "Container Platform"
-    },
-    {
-      "id": 2,
-      "name": "Python",
-      "type": "Programming Language"
-    },
-    {
-      "id": 3,
-      "name": "Flask",
-      "type": "Web Framework"
-    }
-  ]
-}
-```
-
 ### Success Metrics
 
 - Docker image built successfully: ✓
 - Container running: ✓
-- All 3 API endpoints responding correctly: ✓
-- JSON responses properly formatted: ✓
+- API endpoint responding correctly: ✓
+- JSON response properly formatted: ✓
 - Flask application stable: ✓
 
 ## Docker Compose
@@ -249,7 +205,6 @@ Created `docker-compose.yml` with service definition:
 - Service name: api
 - Builds from local Dockerfile
 - Exposes port 5000
-- Includes healthcheck configuration
 - Sets restart policy
 
 ### docker-compose.yml Content
@@ -268,12 +223,6 @@ services:
       - FLASK_APP=app.py
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 ```
 
 ### Testing Docker Compose
@@ -303,7 +252,7 @@ docker run -d --name python-api --network=host python-web-api:latest
    - Ran hello-world container successfully
 
 2. **Python Web API** ✓
-   - Created Flask application with 3 RESTful endpoints
+   - Created Flask application with 1 RESTful endpoint
    - Defined Python dependencies
 
 3. **Dockerfile** ✓
@@ -352,7 +301,7 @@ docker images
 docker ps -a
 
 # Test API from inside container
-docker exec python-api python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"
+docker exec python-api python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/')"
 
 # View logs
 docker logs python-api
