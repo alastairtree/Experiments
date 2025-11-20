@@ -5,8 +5,7 @@ services:
     build: .
     image: python-web-api:latest
     container_name: python-web-api
-    ports:
-      - "5000:5000"
+    network_mode: host
     environment:
       - FLASK_APP=app.py
       - PYTHONUNBUFFERED=1

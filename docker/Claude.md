@@ -165,19 +165,26 @@ docker build -t python-web-api:latest .
 
 ### Running the Container
 
+Using host networking mode for direct access from the host:
+
 ```bash
-docker run -d --name python-api -p 5000:5000 python-web-api:latest
+docker run -d --name python-api --network=host python-web-api:latest
 ```
 
-Container started successfully with ID: `5f795765baed`
+**Why host networking?**
+- Allows direct access to container on localhost:5000
+- Bypasses kernel networking limitations in this environment
+- No need for port mapping
+
+Container started successfully with ID: `e53c32ab649c`
 
 ### Testing the API
 
-Due to networking limitations, tested from inside the container using Python's urllib:
+With host networking, the API is directly accessible from outside the container:
 
 #### Test: Root Endpoint (/)
 ```bash
-docker exec python-api python -c "import urllib.request; import json; response = urllib.request.urlopen('http://localhost:5000/'); print(json.dumps(json.loads(response.read()), indent=2))"
+curl -s http://localhost:5000/ | python3 -m json.tool
 ```
 
 **Response:**
@@ -185,7 +192,7 @@ docker exec python-api python -c "import urllib.request; import json; response =
 {
   "message": "Hello from Docker!",
   "status": "success",
-  "timestamp": "2025-11-20T22:19:00.637428"
+  "timestamp": "2025-11-20T23:42:49.134795"
 }
 ```
 
@@ -204,7 +211,7 @@ docker exec python-api python -c "import urllib.request; import json; response =
 Created `docker-compose.yml` with service definition:
 - Service name: api
 - Builds from local Dockerfile
-- Exposes port 5000
+- Uses host networking for direct access
 - Sets restart policy
 
 ### docker-compose.yml Content
@@ -217,8 +224,7 @@ services:
     build: .
     image: python-web-api:latest
     container_name: python-web-api
-    ports:
-      - "5000:5000"
+    network_mode: host
     environment:
       - FLASK_APP=app.py
       - PYTHONUNBUFFERED=1
@@ -261,9 +267,9 @@ docker run -d --name python-api --network=host python-web-api:latest
    - Successfully created 140MB image
 
 4. **Container Deployment** ✓
-   - Ran containerized API
-   - All endpoints responding correctly
-   - JSON responses validated
+   - Ran containerized API with host networking
+   - API accessible from host on localhost:5000
+   - JSON response validated
 
 5. **docker-compose.yml** ✓
    - Created valid compose file
@@ -283,10 +289,10 @@ docker run -d --name python-api --network=host python-web-api:latest
 
 ### Key Learnings
 
-1. **Network Limitations**: Kernel restrictions required `--iptables=false --bridge=none` flags
+1. **Network Limitations**: Kernel restrictions required `--iptables=false --bridge=none` flags for Docker daemon
 2. **Build Strategy**: Downloaded packages locally to bypass network restrictions during build
 3. **Storage Driver**: VFS storage driver works in constrained environments
-4. **Host Networking**: `--network=host` provides best connectivity in this environment
+4. **Host Networking**: `--network=host` allows direct access to container from host on localhost:5000 without port mapping
 
 ### Verification Commands
 
@@ -300,8 +306,8 @@ docker images
 # List containers
 docker ps -a
 
-# Test API from inside container
-docker exec python-api python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/')"
+# Test API from host (with host networking)
+curl -s http://localhost:5000/ | python3 -m json.tool
 
 # View logs
 docker logs python-api
