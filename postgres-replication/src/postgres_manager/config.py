@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -17,8 +17,7 @@ class InstanceConfig:
     cluster_name: str
     port: int
     admin_user: str
-    data_dir: str
-    socket_dir: str
+    socket_dir: str = "/var/run/postgresql"
 
 
 @dataclass
@@ -34,8 +33,7 @@ class AppConfig:
     """Full application configuration."""
 
     pg_version: int
-    instance1: InstanceConfig
-    instance2: InstanceConfig
+    instances: list[InstanceConfig]
     database: DatabaseConfig
 
 
@@ -51,6 +49,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     Raises:
         FileNotFoundError: If config file does not exist.
         KeyError: If required config keys are missing.
+        ValueError: If no instances are defined.
     """
     path = config_path or DEFAULT_CONFIG_PATH
     if not path.exists():
@@ -61,17 +60,19 @@ def load_config(config_path: Path | None = None) -> AppConfig:
 
     pg_version: int = data["postgres"]["version"]
 
-    def parse_instance(section: dict[str, object]) -> InstanceConfig:
-        return InstanceConfig(
-            cluster_name=str(section["cluster_name"]),
-            port=int(section["port"]),  # type: ignore[arg-type]
-            admin_user=str(section["admin_user"]),
-            data_dir=str(section["data_dir"]),
-            socket_dir=str(section["socket_dir"]),
-        )
+    raw_instances: list[dict[str, object]] = data["instances"]
+    if not raw_instances:
+        raise ValueError("Config must define at least one [[instances]] entry")
 
-    instance1 = parse_instance(data["instance1"])
-    instance2 = parse_instance(data["instance2"])
+    instances = [
+        InstanceConfig(
+            cluster_name=str(s["cluster_name"]),
+            port=int(s["port"]),
+            admin_user=str(s["admin_user"]),
+            socket_dir=str(s.get("socket_dir", "/var/run/postgresql")),
+        )
+        for s in raw_instances
+    ]
 
     db_section: dict[str, object] = data["database"]
     table_section: dict[str, object] = data["table"]
@@ -82,9 +83,53 @@ def load_config(config_path: Path | None = None) -> AppConfig:
 
     return AppConfig(
         pg_version=pg_version,
-        instance1=instance1,
-        instance2=instance2,
+        instances=instances,
         database=database,
+    )
+
+
+def resolve_instance(config: AppConfig, name_or_index: str | None) -> InstanceConfig:
+    """Return the matching InstanceConfig.
+
+    Rules:
+    - If ``name_or_index`` is None and there is exactly one instance, return it.
+    - If ``name_or_index`` matches a cluster_name, return that instance.
+    - If ``name_or_index`` is a 1-based integer string, return by position.
+
+    Args:
+        config: Loaded application configuration.
+        name_or_index: Cluster name, 1-based index string, or None.
+
+    Returns:
+        The matching InstanceConfig.
+
+    Raises:
+        ValueError: When the instance cannot be resolved.
+    """
+    if name_or_index is None:
+        if len(config.instances) == 1:
+            return config.instances[0]
+        names = ", ".join(i.cluster_name for i in config.instances)
+        raise ValueError(
+            f"Multiple instances configured ({names}). "
+            "Specify one with --instance NAME."
+        )
+
+    # Match by cluster_name first
+    for inst in config.instances:
+        if inst.cluster_name == name_or_index:
+            return inst
+
+    # Fall back to 1-based index
+    try:
+        idx = int(name_or_index) - 1
+        return config.instances[idx]
+    except (ValueError, IndexError):
+        pass
+
+    names = ", ".join(i.cluster_name for i in config.instances)
+    raise ValueError(
+        f"Instance '{name_or_index}' not found. Available: {names}"
     )
 
 

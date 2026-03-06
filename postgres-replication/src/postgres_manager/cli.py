@@ -1,4 +1,4 @@
-"""Click CLI for managing two PostgreSQL 18 instances."""
+"""Click CLI for managing PostgreSQL instances."""
 
 from __future__ import annotations
 
@@ -8,52 +8,20 @@ from pathlib import Path
 
 import click
 
-from .config import DEFAULT_CONFIG_PATH, load_config
+from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, resolve_instance
 from .postgres import (
     PostgresError,
-    create_table_all,
-    insert_all,
-    install_all,
-    query_all,
-    start_all,
+    create_admin_user,
+    create_database,
+    create_table,
+    create_cluster,
+    install_postgres,
+    add_pgdg_repo,
+    insert_row,
+    query_rows,
+    start_cluster,
     stop_cluster,
 )
-
-
-def _get_passwords(
-    password1: str | None,
-    password2: str | None,
-) -> tuple[str, str]:
-    """Resolve passwords from CLI args or environment variables.
-
-    Priority: CLI arg > env var.  Exits with an error if either is missing.
-
-    Args:
-        password1: Password for instance 1, or None to read env.
-        password2: Password for instance 2, or None to read env.
-
-    Returns:
-        Tuple of (password1, password2).
-    """
-    p1 = password1 or os.environ.get("PGPASSWORD1", "")
-    p2 = password2 or os.environ.get("PGPASSWORD2", "")
-
-    missing: list[str] = []
-    if not p1:
-        missing.append("--password1 / PGPASSWORD1")
-    if not p2:
-        missing.append("--password2 / PGPASSWORD2")
-
-    if missing:
-        click.echo(
-            f"Error: missing required passwords: {', '.join(missing)}\n"
-            "Provide them via --password1/--password2 or the PGPASSWORD1/PGPASSWORD2 "
-            "environment variables.",
-            err=True,
-        )
-        sys.exit(1)
-
-    return p1, p2
 
 
 # ---------------------------------------------------------------------------
@@ -65,30 +33,47 @@ _config_option = click.option(
     "-c",
     default=None,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help=f"Path to config.toml file. Defaults to {DEFAULT_CONFIG_PATH}.",
+    help=f"Path to config.toml. Defaults to {DEFAULT_CONFIG_PATH}.",
 )
 
-_password_options = [
-    click.option(
-        "--password1",
-        envvar="PGPASSWORD1",
-        default=None,
-        help="Admin password for instance 1 (or set PGPASSWORD1).",
+_instance_option = click.option(
+    "--instance",
+    "-i",
+    default=None,
+    metavar="NAME",
+    help=(
+        "Cluster name or 1-based index of the instance to operate on. "
+        "Required when the config defines more than one instance."
     ),
-    click.option(
-        "--password2",
-        envvar="PGPASSWORD2",
-        default=None,
-        help="Admin password for instance 2 (or set PGPASSWORD2).",
-    ),
-]
+)
+
+_password_option = click.option(
+    "--password",
+    envvar="PGPASSWORD",
+    default=None,
+    help="Admin password for the selected instance (or set PGPASSWORD).",
+)
 
 
-def _add_password_options(func: click.decorators.FC) -> click.decorators.FC:
-    """Decorator that adds both password options to a command."""
-    for option in reversed(_password_options):
-        func = option(func)
-    return func
+def _require_password(password: str | None, instance_name: str) -> str:
+    """Return the password or exit with a helpful error.
+
+    Args:
+        password: Value from CLI / env, may be None.
+        instance_name: Human-readable instance identifier for the error message.
+
+    Returns:
+        Non-empty password string.
+    """
+    pw = password or os.environ.get("PGPASSWORD", "")
+    if not pw:
+        click.echo(
+            f"Error: no password supplied for instance '{instance_name}'.\n"
+            "Use --password or set the PGPASSWORD environment variable.",
+            err=True,
+        )
+        sys.exit(1)
+    return pw
 
 
 # ---------------------------------------------------------------------------
@@ -99,11 +84,14 @@ def _add_password_options(func: click.decorators.FC) -> click.decorators.FC:
 @click.group()
 @click.version_option()
 def main() -> None:
-    """Manage two PostgreSQL 18 instances on the local machine.
+    """Manage one or more PostgreSQL instances on the local machine.
 
-    Use PGPASSWORD1 / PGPASSWORD2 environment variables (or --password1 /
-    --password2 flags) to supply admin passwords without storing them in the
-    config file.
+    Each command targets a single instance selected with --instance NAME (or the
+    cluster's 1-based position in config.toml).  When only one instance is
+    configured the --instance flag is optional.
+
+    Passwords are never stored in the config file.  Supply them via
+    --password or the PGPASSWORD environment variable.
     """
 
 
@@ -114,19 +102,23 @@ def main() -> None:
 
 @main.command()
 @_config_option
-def install(config: Path | None) -> None:
-    """Install PostgreSQL 18 and initialise both clusters.
+@_instance_option
+def install(config: Path | None, instance: str | None) -> None:
+    """Install PostgreSQL and initialise a cluster.
 
-    This command requires root / sudo privileges.
-    It adds the PGDG apt repository, installs the postgresql-18 package,
-    and calls pg_createcluster for each instance defined in config.toml.
+    Adds the PGDG apt repository, installs the postgresql-<version> package
+    (if not already present), and calls pg_createcluster for the selected
+    instance.  Requires root / sudo.
     """
     try:
         cfg = load_config(config)
-        click.echo(f"Installing PostgreSQL {cfg.pg_version} and creating clusters...")
-        install_all(cfg)
+        inst = resolve_instance(cfg, instance)
+        click.echo(f"Installing PostgreSQL {cfg.pg_version} for '{inst.cluster_name}'...")
+        add_pgdg_repo()
+        install_postgres(cfg.pg_version)
+        create_cluster(cfg.pg_version, inst)
         click.echo("Installation complete.")
-    except (FileNotFoundError, KeyError, PostgresError) as exc:
+    except (FileNotFoundError, KeyError, ValueError, PostgresError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
@@ -138,24 +130,27 @@ def install(config: Path | None) -> None:
 
 @main.command()
 @_config_option
-@_add_password_options
+@_instance_option
+@_password_option
 def start(
     config: Path | None,
-    password1: str | None,
-    password2: str | None,
+    instance: str | None,
+    password: str | None,
 ) -> None:
-    """Start both PostgreSQL clusters and create admin users.
+    """Start a cluster and ensure the admin user exists.
 
-    This command requires root / sudo privileges.
-    Admin users are created (or their passwords updated) on first start.
+    Requires root / sudo.  Admin users are created (or their passwords
+    updated) on first start.
     """
-    p1, p2 = _get_passwords(password1, password2)
     try:
         cfg = load_config(config)
-        click.echo("Starting clusters and configuring admin users...")
-        start_all(cfg, p1, p2)
-        click.echo("Both clusters started.")
-    except (FileNotFoundError, KeyError, PostgresError) as exc:
+        inst = resolve_instance(cfg, instance)
+        pw = _require_password(password, inst.cluster_name)
+        click.echo(f"Starting cluster '{inst.cluster_name}'...")
+        start_cluster(cfg.pg_version, inst.cluster_name)
+        create_admin_user(inst, pw)
+        click.echo(f"Cluster '{inst.cluster_name}' started.")
+    except (FileNotFoundError, KeyError, ValueError, PostgresError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
@@ -167,14 +162,15 @@ def start(
 
 @main.command()
 @_config_option
-def stop(config: Path | None) -> None:
-    """Stop both PostgreSQL clusters."""
+@_instance_option
+def stop(config: Path | None, instance: str | None) -> None:
+    """Stop a cluster."""
     try:
         cfg = load_config(config)
-        stop_cluster(cfg.pg_version, cfg.instance1.cluster_name)
-        stop_cluster(cfg.pg_version, cfg.instance2.cluster_name)
-        click.echo("Both clusters stopped.")
-    except (FileNotFoundError, KeyError, PostgresError) as exc:
+        inst = resolve_instance(cfg, instance)
+        stop_cluster(cfg.pg_version, inst.cluster_name)
+        click.echo(f"Cluster '{inst.cluster_name}' stopped.")
+    except (FileNotFoundError, KeyError, ValueError, PostgresError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
@@ -186,26 +182,31 @@ def stop(config: Path | None) -> None:
 
 @main.command("create-table")
 @_config_option
-@_add_password_options
-def create_table(
+@_instance_option
+@_password_option
+def create_table_cmd(
     config: Path | None,
-    password1: str | None,
-    password2: str | None,
+    instance: str | None,
+    password: str | None,
 ) -> None:
-    """Create the database and demo table in both instances.
+    """Create the database and demo table in an instance.
 
-    Creates the database specified in config.toml (same name in each instance)
-    and then creates a table named 'demo' (or whatever is configured) in each.
+    Creates the database specified in config.toml (if it does not already
+    exist) and then creates the demo table inside it.
     """
-    p1, p2 = _get_passwords(password1, password2)
     try:
         cfg = load_config(config)
+        inst = resolve_instance(cfg, instance)
+        pw = _require_password(password, inst.cluster_name)
         db = cfg.database.name
         tbl = cfg.database.table_name
-        click.echo(f"Creating database '{db}' and table '{tbl}' in both instances...")
-        create_table_all(cfg, p1, p2)
-        click.echo("Database and table created in both instances.")
-    except (FileNotFoundError, KeyError, PostgresError) as exc:
+        click.echo(
+            f"Creating database '{db}' and table '{tbl}' in '{inst.cluster_name}'..."
+        )
+        create_database(inst, pw, db)
+        create_table(inst, pw, db, tbl)
+        click.echo("Done.")
+    except (FileNotFoundError, KeyError, ValueError, PostgresError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
@@ -217,24 +218,31 @@ def create_table(
 
 @main.command()
 @_config_option
-@_add_password_options
+@_instance_option
+@_password_option
+@click.option(
+    "--message",
+    "-m",
+    default=None,
+    help="Custom message to insert. Defaults to a generated message.",
+)
 def insert(
     config: Path | None,
-    password1: str | None,
-    password2: str | None,
+    instance: str | None,
+    password: str | None,
+    message: str | None,
 ) -> None:
-    """Insert a unique row into the demo table in each instance.
-
-    Each instance receives a different message row, demonstrating that the
-    two instances are independent.
-    """
-    p1, p2 = _get_passwords(password1, password2)
+    """Insert a row into the demo table."""
     try:
         cfg = load_config(config)
-        click.echo("Inserting rows into both instances...")
-        insert_all(cfg, p1, p2)
-        click.echo("Rows inserted into both instances.")
-    except (FileNotFoundError, KeyError, PostgresError) as exc:
+        inst = resolve_instance(cfg, instance)
+        pw = _require_password(password, inst.cluster_name)
+        db = cfg.database.name
+        tbl = cfg.database.table_name
+        msg = message or f"Hello from instance '{inst.cluster_name}'"
+        row_id = insert_row(inst, pw, db, tbl, msg)
+        click.echo(f"Inserted row id={row_id} into '{inst.cluster_name}'.")
+    except (FileNotFoundError, KeyError, ValueError, PostgresError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
@@ -246,67 +254,35 @@ def insert(
 
 @main.command()
 @_config_option
-@_add_password_options
+@_instance_option
+@_password_option
 def query(
     config: Path | None,
-    password1: str | None,
-    password2: str | None,
+    instance: str | None,
+    password: str | None,
 ) -> None:
-    """Query the demo table from both instances and display results.
-
-    Demonstrates that each instance holds its own independent data.
-    """
-    p1, p2 = _get_passwords(password1, password2)
+    """Query the demo table from an instance and display results."""
     try:
         cfg = load_config(config)
+        inst = resolve_instance(cfg, instance)
+        pw = _require_password(password, inst.cluster_name)
         db = cfg.database.name
         tbl = cfg.database.table_name
-        click.echo(f"Querying '{tbl}' in '{db}' from both instances...\n")
-        rows1, rows2 = query_all(cfg, p1, p2)
-
-        _print_results(
-            f"Instance 1 ({cfg.instance1.cluster_name}, port {cfg.instance1.port})",
-            rows1,
+        rows = query_rows(inst, pw, db, tbl)
+        click.echo(
+            click.style(
+                f"--- {inst.cluster_name} (port {inst.port}) ---",
+                bold=True,
+            )
         )
-        _print_results(
-            f"Instance 2 ({cfg.instance2.cluster_name}, port {cfg.instance2.port})",
-            rows2,
-        )
-
-        if rows1 and rows2:
-            if rows1 != rows2:
+        if not rows:
+            click.echo("  (no rows)")
+        else:
+            for row in rows:
                 click.echo(
-                    click.style(
-                        "✓ Instances hold different data — confirmed independent instances.",
-                        fg="green",
-                    )
+                    f"  id={row['id']}  instance={row['instance']!r}  "
+                    f"message={row['message']!r}  created={row['created']}"
                 )
-            else:
-                click.echo(
-                    click.style(
-                        "⚠  Instances hold identical data.",
-                        fg="yellow",
-                    )
-                )
-    except (FileNotFoundError, KeyError, PostgresError) as exc:
+    except (FileNotFoundError, KeyError, ValueError, PostgresError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
-
-
-def _print_results(label: str, rows: list[dict[str, object]]) -> None:
-    """Pretty-print query results.
-
-    Args:
-        label: Section heading.
-        rows: List of row dicts.
-    """
-    click.echo(click.style(f"--- {label} ---", bold=True))
-    if not rows:
-        click.echo("  (no rows)")
-    else:
-        for row in rows:
-            click.echo(
-                f"  id={row['id']}  instance={row['instance']!r}  "
-                f"message={row['message']!r}  created={row['created']}"
-            )
-    click.echo()

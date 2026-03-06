@@ -1,18 +1,16 @@
 [postgres]
 version = 18
 
-[instance1]
+[[instances]]
 cluster_name = "main1"
 port = 5432
 admin_user = "pgadmin1"
-data_dir = "/var/lib/postgresql/18/main1"
 socket_dir = "/var/run/postgresql"
 
-[instance2]
+[[instances]]
 cluster_name = "main2"
 port = 5433
 admin_user = "pgadmin2"
-data_dir = "/var/lib/postgresql/18/main2"
 socket_dir = "/var/run/postgresql"
 
 [database]

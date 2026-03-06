@@ -49,10 +49,8 @@ def add_pgdg_repo() -> None:
         print("  PGDG repository already configured.")
         return
 
-    # Install prerequisites
     _run(["apt-get", "install", "-y", "curl", "gnupg", "lsb-release"])
 
-    # Download the PGDG signing key
     key_result = _run(
         ["curl", "-fsSL", "https://www.postgresql.org/media/keys/ACCC4CF8.asc"],
         capture=True,
@@ -64,11 +62,9 @@ def add_pgdg_repo() -> None:
         check=True,
     )
 
-    # Detect Ubuntu codename
     codename_result = _run(["lsb_release", "-cs"], capture=True)
     codename = codename_result.stdout.strip()
 
-    # Write sources file
     sources_file.write_text(
         f"deb https://apt.postgresql.org/pub/repos/apt {codename}-pgdg main\n"
     )
@@ -123,7 +119,7 @@ def create_cluster(pg_version: int, instance: InstanceConfig) -> None:
 
     Args:
         pg_version: PostgreSQL major version.
-        instance: Instance configuration containing cluster_name and port.
+        instance: Instance configuration.
     """
     if cluster_exists(pg_version, instance.cluster_name):
         print(f"  Cluster {pg_version}/{instance.cluster_name} already exists, skipping.")
@@ -151,7 +147,6 @@ def start_cluster(pg_version: int, cluster_name: str) -> None:
     """
     print(f"Starting cluster {pg_version}/{cluster_name}...")
     _run(["pg_ctlcluster", str(pg_version), cluster_name, "start"])
-    # Allow a moment for the server to become ready
     time.sleep(2)
     print(f"  Cluster {pg_version}/{cluster_name} started.")
 
@@ -178,8 +173,8 @@ def _socket_connect(
     """Connect to PostgreSQL via unix socket (peer/trust auth).
 
     Args:
-        port: Port number (used to locate the correct socket).
-        user: Database user (default: postgres superuser).
+        port: Port number.
+        user: Database user.
 
     Returns:
         Open psycopg connection with autocommit enabled.
@@ -197,30 +192,27 @@ def _socket_connect(
 def create_admin_user(instance: InstanceConfig, password: str) -> None:
     """Create the admin user in an instance with the supplied password.
 
-    Connects via the unix socket as the postgres superuser (trust auth),
-    then creates/updates the named role.
-
     Args:
         instance: Instance configuration.
         password: Password to set for the admin user.
     """
     print(f"  Creating admin user '{instance.admin_user}' on port {instance.port}...")
     role_ident = sql.Identifier(instance.admin_user)
+    # PostgreSQL DDL (CREATE/ALTER ROLE) does not accept $N parameters;
+    # use sql.Literal so psycopg safely quotes and escapes the password value.
+    pw_literal = sql.Literal(password)
     with _socket_connect(instance.port) as conn:
         try:
             conn.execute(
                 sql.SQL(
-                    "CREATE ROLE {} WITH LOGIN SUPERUSER PASSWORD %s"
-                ).format(role_ident),
-                (password,),
+                    "CREATE ROLE {} WITH LOGIN SUPERUSER PASSWORD {}"
+                ).format(role_ident, pw_literal)
             )
         except errors.DuplicateObject:
-            # Role already exists – update the password
             conn.execute(
                 sql.SQL(
-                    "ALTER ROLE {} WITH LOGIN SUPERUSER PASSWORD %s"
-                ).format(role_ident),
-                (password,),
+                    "ALTER ROLE {} WITH LOGIN SUPERUSER PASSWORD {}"
+                ).format(role_ident, pw_literal)
             )
     print(f"  Admin user '{instance.admin_user}' ready.")
 
@@ -252,7 +244,7 @@ def _tcp_connect(
 
 
 def create_database(instance: InstanceConfig, password: str, db_name: str) -> None:
-    """Create a database in an instance if it does not already exist.
+    """Create a database if it does not already exist.
 
     Args:
         instance: Instance configuration.
@@ -365,100 +357,3 @@ def query_rows(
         columns = [desc[0] for desc in cursor.description or []]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
     return rows
-
-
-# ---------------------------------------------------------------------------
-# High-level orchestration helpers (used by CLI)
-# ---------------------------------------------------------------------------
-
-def install_all(config: AppConfig) -> None:
-    """Full installation: add PGDG repo, install PG, create both clusters.
-
-    Args:
-        config: Application configuration.
-    """
-    add_pgdg_repo()
-    install_postgres(config.pg_version)
-    create_cluster(config.pg_version, config.instance1)
-    create_cluster(config.pg_version, config.instance2)
-
-
-def start_all(config: AppConfig, password1: str, password2: str) -> None:
-    """Start both clusters and ensure admin users exist.
-
-    Args:
-        config: Application configuration.
-        password1: Password for instance 1 admin user.
-        password2: Password for instance 2 admin user.
-    """
-    start_cluster(config.pg_version, config.instance1.cluster_name)
-    start_cluster(config.pg_version, config.instance2.cluster_name)
-    create_admin_user(config.instance1, password1)
-    create_admin_user(config.instance2, password2)
-
-
-def create_table_all(config: AppConfig, password1: str, password2: str) -> None:
-    """Create databases and tables in both instances.
-
-    Args:
-        config: Application configuration.
-        password1: Password for instance 1 admin user.
-        password2: Password for instance 2 admin user.
-    """
-    db = config.database.name
-    tbl = config.database.table_name
-
-    create_database(config.instance1, password1, db)
-    create_database(config.instance2, password2, db)
-    create_table(config.instance1, password1, db, tbl)
-    create_table(config.instance2, password2, db, tbl)
-
-
-def insert_all(config: AppConfig, password1: str, password2: str) -> None:
-    """Insert a distinct row into each instance.
-
-    Args:
-        config: Application configuration.
-        password1: Password for instance 1 admin user.
-        password2: Password for instance 2 admin user.
-    """
-    db = config.database.name
-    tbl = config.database.table_name
-
-    insert_row(
-        config.instance1,
-        password1,
-        db,
-        tbl,
-        f"Hello from instance 1 ({config.instance1.cluster_name})",
-    )
-    insert_row(
-        config.instance2,
-        password2,
-        db,
-        tbl,
-        f"Hello from instance 2 ({config.instance2.cluster_name})",
-    )
-
-
-def query_all(
-    config: AppConfig,
-    password1: str,
-    password2: str,
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    """Query rows from both instances and return them.
-
-    Args:
-        config: Application configuration.
-        password1: Password for instance 1 admin user.
-        password2: Password for instance 2 admin user.
-
-    Returns:
-        Tuple of (rows_from_instance1, rows_from_instance2).
-    """
-    db = config.database.name
-    tbl = config.database.table_name
-
-    rows1 = query_rows(config.instance1, password1, db, tbl)
-    rows2 = query_rows(config.instance2, password2, db, tbl)
-    return rows1, rows2
