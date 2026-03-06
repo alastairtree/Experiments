@@ -6,6 +6,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import tomli_w
+
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "config.toml"
 
@@ -29,12 +31,38 @@ class DatabaseConfig:
 
 
 @dataclass
+class TableReplicationEntry:
+    """Replication status for a single table."""
+
+    schema: str
+    name: str
+    # "create"  – exists in publisher, missing in subscriber
+    # "alter"   – exists in both but columns differ (subscriber is subset)
+    # "exists"  – identical in both instances
+    # "incompatible" – columns conflict; manual intervention required
+    status: str
+
+
+@dataclass
+class ReplicationConfig:
+    """Logical replication configuration."""
+
+    publisher_instance: str
+    subscriber_instance: str
+    publication_name: str
+    subscription_name: str
+    replication_user: str
+    tables: list[TableReplicationEntry] = field(default_factory=list)
+
+
+@dataclass
 class AppConfig:
     """Full application configuration."""
 
     pg_version: int
     instances: list[InstanceConfig]
     database: DatabaseConfig
+    replication: ReplicationConfig | None = None
 
 
 def load_config(config_path: Path | None = None) -> AppConfig:
@@ -81,11 +109,64 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         table_name=str(table_section["name"]),
     )
 
+    replication: ReplicationConfig | None = None
+    if "replication" in data:
+        r: dict[str, object] = data["replication"]
+        raw_tables: list[dict[str, object]] = r.get("tables", [])
+        replication = ReplicationConfig(
+            publisher_instance=str(r["publisher_instance"]),
+            subscriber_instance=str(r["subscriber_instance"]),
+            publication_name=str(r["publication_name"]),
+            subscription_name=str(r["subscription_name"]),
+            replication_user=str(r["replication_user"]),
+            tables=[
+                TableReplicationEntry(
+                    schema=str(t["schema"]),
+                    name=str(t["name"]),
+                    status=str(t["status"]),
+                )
+                for t in raw_tables
+            ],
+        )
+
     return AppConfig(
         pg_version=pg_version,
         instances=instances,
         database=database,
+        replication=replication,
     )
+
+
+def save_replication_config(
+    config_path: Path,
+    replication: ReplicationConfig,
+) -> None:
+    """Write the replication section back to the TOML config file.
+
+    Reads the existing file, replaces/adds the ``[replication]`` section, then
+    writes the result back atomically.
+
+    Args:
+        config_path: Path to config.toml (must already exist).
+        replication: The replication configuration to persist.
+    """
+    with open(config_path, "rb") as f:
+        data: dict[str, object] = tomllib.load(f)
+
+    data["replication"] = {
+        "publisher_instance": replication.publisher_instance,
+        "subscriber_instance": replication.subscriber_instance,
+        "publication_name": replication.publication_name,
+        "subscription_name": replication.subscription_name,
+        "replication_user": replication.replication_user,
+        "tables": [
+            {"schema": t.schema, "name": t.name, "status": t.status}
+            for t in replication.tables
+        ],
+    }
+
+    with open(config_path, "wb") as f:
+        tomli_w.dump(data, f)
 
 
 def resolve_instance(config: AppConfig, name_or_index: str | None) -> InstanceConfig:
@@ -115,12 +196,10 @@ def resolve_instance(config: AppConfig, name_or_index: str | None) -> InstanceCo
             "Specify one with --instance NAME."
         )
 
-    # Match by cluster_name first
     for inst in config.instances:
         if inst.cluster_name == name_or_index:
             return inst
 
-    # Fall back to 1-based index
     try:
         idx = int(name_or_index) - 1
         return config.instances[idx]

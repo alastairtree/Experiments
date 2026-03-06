@@ -184,6 +184,105 @@ uv run postgres-manager query --instance main1
 uv run postgres-manager query --instance main2
 ```
 
+### `replication prepare`
+
+Compares the publisher's tables against the subscriber's and writes a
+`[replication]` section to `config.toml`.  Each table is tagged with a
+status: `create`, `alter`, `exists`, or `incompatible`.
+
+```bash
+uv run postgres-manager replication prepare \
+  --publisher main1 --subscriber main2 \
+  --pub-password "$PW1" --sub-password "$PW2" \
+  --replication-user replicator \
+  --publication-name my_pub \
+  --subscription-name my_sub
+```
+
+Alternatively set `PGPASSWORD_PUB` and `PGPASSWORD_SUB` instead of passing
+`--pub-password` / `--sub-password`.
+
+### `replication setup-publisher`
+
+Sets `wal_level = logical` (restarting the cluster if needed), creates the
+replication role, grants `SELECT` on the published tables, and creates the
+`PUBLICATION`.
+
+```bash
+uv run postgres-manager replication setup-publisher \
+  --password "$PW1" \
+  --replication-password "$REPL_PW"
+```
+
+Or set `PGPASSWORD` and `PGREPLICATION_PASSWORD`.
+
+### `replication setup-subscriber`
+
+Creates any tables on the subscriber that are marked `create` in config, then
+creates the `SUBSCRIPTION` pointing at the publisher.
+
+```bash
+uv run postgres-manager replication setup-subscriber \
+  --password "$PW2" \
+  --replication-password "$REPL_PW" \
+  --pub-password "$PW1"   # needed to fetch DDL for missing tables
+```
+
+### `replication monitor`
+
+Shows live replication status from the publisher: connected subscribers
+(`pg_stat_replication`) and logical slot lag in bytes (`pg_replication_slots`).
+
+```bash
+uv run postgres-manager replication monitor --password "$PW1"
+```
+
+---
+
+## Logical replication walkthrough
+
+```bash
+export PGPASSWORD_PUB="admin_password"   # publisher admin
+export PGPASSWORD_SUB="admin_password"   # subscriber admin (can differ)
+export PGREPLICATION_PASSWORD="repl_secret"
+
+# 1. Create the demo table on the publisher only
+uv run postgres-manager create-table --instance main1 --password "$PGPASSWORD_PUB"
+
+# 2. Create the database on the subscriber (no table yet)
+#    (create-table creates both DB and table; we just need the DB here)
+uv run postgres-manager create-table --instance main2 --password "$PGPASSWORD_SUB"
+
+# 3. Prepare: compare tables and write replication config
+uv run postgres-manager replication prepare \
+  --publisher main1 --subscriber main2 \
+  --pub-password "$PGPASSWORD_PUB" --sub-password "$PGPASSWORD_SUB" \
+  --replication-user replicator \
+  --publication-name my_pub \
+  --subscription-name my_sub
+
+# 4. Configure the publisher
+uv run postgres-manager replication setup-publisher \
+  --password "$PGPASSWORD_PUB" \
+  --replication-password "$PGREPLICATION_PASSWORD"
+
+# 5. Configure the subscriber (creates missing tables + subscription)
+uv run postgres-manager replication setup-subscriber \
+  --password "$PGPASSWORD_SUB" \
+  --replication-password "$PGREPLICATION_PASSWORD" \
+  --pub-password "$PGPASSWORD_PUB"
+
+# 6. Insert data on publisher and watch it replicate
+uv run postgres-manager insert --instance main1 \
+  --password "$PGPASSWORD_PUB" \
+  --message "replication test"
+
+uv run postgres-manager query --instance main2 --password "$PGPASSWORD_SUB"
+
+# 7. Monitor replication lag
+uv run postgres-manager replication monitor --password "$PGPASSWORD_PUB"
+```
+
 ---
 
 ## End-to-end walkthrough
@@ -254,11 +353,14 @@ uv run pytest tests/test_cli.py -v
 | `tests/test_config.py` | Config loading, `resolve_instance`, connection string builder — no DB needed |
 | `tests/test_postgres.py` | `create_database`, `create_table`, `insert_row`, `query_rows` against real PG |
 | `tests/test_cli.py` | All Click commands via `CliRunner` against real PG |
+| `tests/test_replication.py` | Full logical replication workflow via CLI against real PG |
 
 Key integration assertions:
 - Each command is called **twice** (once per instance).
 - `test_two_instances_hold_different_data` / `test_instances_contain_different_data`
   verify that the two instances are truly independent.
+- `test_data_replicates_from_publisher_to_subscriber` inserts a row on the publisher
+  and confirms it appears on the subscriber within 10 seconds.
 
 ---
 

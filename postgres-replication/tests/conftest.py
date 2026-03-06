@@ -36,6 +36,12 @@ TEST_PASSWORD_2 = "testpw_two_456"
 TEST_DB = "testdb"
 TEST_TABLE = "demo"
 
+# Replication-specific constants
+TEST_REPL_USER = "testreplicator"
+TEST_REPL_PASSWORD = "replpw_test_789"
+TEST_PUBLICATION = "test_pub"
+TEST_SUBSCRIPTION = "test_sub"
+
 
 # ---------------------------------------------------------------------------
 # Low-level helpers
@@ -121,6 +127,20 @@ def _ensure_admin_user(port: int, admin_user: str, password: str) -> None:
             )
 
 
+def _set_wal_logical(version: int, cluster_name: str) -> None:
+    """Set wal_level = logical on a cluster and restart it."""
+    conf_path = Path(f"/etc/postgresql/{version}/{cluster_name}/postgresql.conf")
+    if not conf_path.exists():
+        return
+    content = conf_path.read_text()
+    # Remove any existing wal_level line and add ours
+    lines = [ln for ln in content.splitlines() if not ln.strip().startswith("wal_level")]
+    lines.append("wal_level = logical")
+    conf_path.write_text("\n".join(lines) + "\n")
+    _run(["pg_ctlcluster", str(version), cluster_name, "restart"])
+    time.sleep(3)
+
+
 # ---------------------------------------------------------------------------
 # Session-scoped fixture: two live postgres clusters
 # ---------------------------------------------------------------------------
@@ -136,6 +156,10 @@ def pg_instances() -> Generator[dict[str, object], None, None]:
     # Setup
     _create_cluster(TEST_PG_VERSION, TEST_CLUSTER_1, TEST_PORT_1)
     _create_cluster(TEST_PG_VERSION, TEST_CLUSTER_2, TEST_PORT_2)
+
+    # Set wal_level = logical on publisher (cluster 1) before starting
+    _set_wal_logical(TEST_PG_VERSION, TEST_CLUSTER_1)
+
     _start_cluster(TEST_PG_VERSION, TEST_CLUSTER_1)
     _start_cluster(TEST_PG_VERSION, TEST_CLUSTER_2)
     _ensure_admin_user(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1)
