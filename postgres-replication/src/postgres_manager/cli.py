@@ -15,6 +15,13 @@ from .config import (
     resolve_instance,
     save_replication_config,
 )
+from .schema_evolution import (
+    DriftReport,
+    RepairPlan,
+    apply_repair_step,
+    detect_drift,
+    plan_repair,
+)
 from .postgres import (
     PostgresError,
     create_admin_user,
@@ -728,5 +735,317 @@ def replication_monitor(
                                 )
 
     except (FileNotFoundError, KeyError, ValueError, ReplicationError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# replication detect-drift
+# ---------------------------------------------------------------------------
+
+
+@replication.command("detect-drift")
+@_config_option
+@click.option(
+    "--pub-password",
+    envvar="PGPASSWORD",
+    default=None,
+    help="Admin password for the publisher instance (or set PGPASSWORD).",
+)
+@click.option(
+    "--sub-password",
+    envvar="PGPASSWORD_SUB",
+    default=None,
+    help="Admin password for the subscriber instance (or set PGPASSWORD_SUB).",
+)
+@click.option(
+    "--output",
+    "-o",
+    default="replication-drift.json",
+    show_default=True,
+    type=click.Path(dir_okay=False, writable=True, path_type=Path),
+    help="Path to write the drift report JSON.",
+)
+def replication_detect_drift(
+    config: Path | None,
+    pub_password: str | None,
+    sub_password: str | None,
+    output: Path,
+) -> None:
+    """Detect schema and configuration drift between publisher and subscriber.
+
+    Compares the live state of both instances and writes a JSON drift report.
+    No changes are made to any database.
+    """
+    try:
+        config_path = config or DEFAULT_CONFIG_PATH
+        cfg = load_config(config_path)
+        rep = cfg.replication
+        if rep is None:
+            click.echo(
+                "Error: no [replication] section in config. Run 'replication prepare' first.",
+                err=True,
+            )
+            sys.exit(1)
+
+        pub = resolve_instance(cfg, rep.publisher_instance)
+        sub = resolve_instance(cfg, rep.subscriber_instance)
+        pw = _require_password(pub_password, pub.cluster_name)
+        eff_sub_pw = sub_password or pw
+
+        click.echo(click.style("Detecting drift...", bold=True))
+        click.echo(f"  [PUBLISHER]  {pub.cluster_name} (port {pub.port})")
+        click.echo(f"  [SUBSCRIBER] {sub.cluster_name} (port {sub.port})")
+        click.echo(f"  Publication: {rep.publication_name}")
+        click.echo(f"  Subscription: {rep.subscription_name}")
+        click.echo(f"  Database: {cfg.database.name}")
+
+        report = detect_drift(pub, pw, sub, eff_sub_pw, rep, cfg.database.name)
+
+        click.echo("")
+        if not report.table_drifts and report.slot_health and report.slot_health.active:
+            click.echo(
+                click.style("No drift detected — publisher and subscriber are in sync.", fg="green")
+            )
+        else:
+            if report.slot_health:
+                slot = report.slot_health
+                status = "active" if slot.active else "INACTIVE"
+                inv = (
+                    f" (invalidated: {slot.invalidation_reason})"
+                    if slot.invalidation_reason
+                    else ""
+                )
+                click.echo(f"Slot '{slot.slot_name}': {status}, lag={slot.lag_bytes} bytes{inv}")
+                if slot.invalidation_reason:
+                    click.echo(
+                        click.style(
+                            "  WARNING: slot invalidated — full resync may be required.",
+                            fg="red",
+                        )
+                    )
+
+            if report.table_drifts:
+                click.echo(
+                    click.style(
+                        f"\nFound {len(report.table_drifts)} table(s) with drift:", bold=True
+                    )
+                )
+                for drift in report.table_drifts:
+                    fqn = f"{drift.schema}.{drift.table}"
+                    click.echo(f"\n  {fqn}")
+                    issue_labels = {
+                        "new_unconfigured": "not in publication (new table?)",
+                        "dropped_from_publisher": "in publication but DROPPED from publisher",
+                        "missing_on_subscriber": "in publication but missing on subscriber",
+                        "schema_changed": "column differences detected",
+                        "no_replica_identity": "no REPLICA IDENTITY / primary key",
+                    }
+                    for issue in drift.issues:
+                        click.echo(f"    - {issue_labels.get(issue, issue)}")
+                    for cd in drift.column_diffs:
+                        click.echo(f"    column '{cd.name}': {cd.issue}")
+                        if cd.publisher_type:
+                            click.echo(f"      publisher type: {cd.publisher_type}")
+                        if cd.subscriber_type:
+                            click.echo(f"      subscriber type: {cd.subscriber_type}")
+                        if cd.suggestion:
+                            click.echo(f"      suggestion: {cd.suggestion}")
+            else:
+                click.echo("No table drift detected.")
+
+        output.write_text(report.to_json())
+        click.echo(f"\nDrift report written to: {output}")
+        click.echo("Run 'replication plan-repair' to generate a repair plan.")
+
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# replication plan-repair
+# ---------------------------------------------------------------------------
+
+
+@replication.command("plan-repair")
+@_config_option
+@click.option(
+    "--drift-report",
+    "drift_report_path",
+    default="replication-drift.json",
+    show_default=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to the drift report JSON produced by 'detect-drift'.",
+)
+@click.option(
+    "--output",
+    "-o",
+    default="replication-plan.json",
+    show_default=True,
+    type=click.Path(dir_okay=False, writable=True, path_type=Path),
+    help="Path to write the repair plan JSON.",
+)
+def replication_plan_repair(
+    config: Path | None,
+    drift_report_path: Path,
+    output: Path,
+) -> None:
+    """Generate an ordered repair plan from a drift report.
+
+    Reads the JSON drift report and produces a replication-plan.json with
+    ordered, phase-annotated steps labelled [PUBLISHER] or [SUBSCRIBER].
+    The plan file can be edited before applying.
+    """
+    try:
+        cfg = load_config(config or DEFAULT_CONFIG_PATH)
+        rep = cfg.replication
+        if rep is None:
+            click.echo("Error: no [replication] section in config.", err=True)
+            sys.exit(1)
+
+        report = DriftReport.from_json(drift_report_path.read_text())
+        plan = plan_repair(report, rep.replication_user)
+
+        click.echo(click.style("Repair Plan Summary", bold=True))
+        click.echo(f"  Publisher:   [{plan.publisher_instance}]")
+        click.echo(f"  Subscriber:  [{plan.subscriber_instance}]")
+        click.echo(f"  Steps:       {len(plan.steps)}")
+        if plan.needs_full_resync:
+            click.echo(
+                click.style("  WARNING: full resync required (slot invalidated)", fg="red")
+            )
+
+        if plan.steps:
+            click.echo("")
+            for step in plan.steps:
+                risk_color = {"low": "green", "medium": "yellow", "high": "red"}.get(
+                    step.risk, "white"
+                )
+                risk_label = click.style(f"[{step.risk.upper()}]", fg=risk_color)
+                manual = " *** MANUAL REVIEW ***" if step.manual_review else ""
+                click.echo(
+                    f"  Step {step.step}: Phase {step.phase} | [{step.target.upper()}] "
+                    f"{risk_label}{manual}"
+                )
+                click.echo(f"    {step.description}")
+                for stmt in step.sql:
+                    click.echo(f"      {stmt}")
+        else:
+            click.echo("  No repair steps needed.")
+
+        output.write_text(plan.to_json())
+        click.echo(f"\nRepair plan written to: {output}")
+        click.echo("Review the plan, then run 'replication apply-repair' to execute it.")
+
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# replication apply-repair
+# ---------------------------------------------------------------------------
+
+
+@replication.command("apply-repair")
+@_config_option
+@click.option(
+    "--plan",
+    "plan_path",
+    default="replication-plan.json",
+    show_default=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to the repair plan JSON produced by 'plan-repair'.",
+)
+@click.option(
+    "--pub-password",
+    envvar="PGPASSWORD",
+    default=None,
+    help="Admin password for the publisher instance (or set PGPASSWORD).",
+)
+@click.option(
+    "--sub-password",
+    envvar="PGPASSWORD_SUB",
+    default=None,
+    help="Admin password for the subscriber instance (or set PGPASSWORD_SUB).",
+)
+@click.option(
+    "--step",
+    "only_step",
+    default=None,
+    type=int,
+    help="Apply only this step number (useful for partial application).",
+)
+@_dry_run_option
+def replication_apply_repair(
+    config: Path | None,
+    plan_path: Path,
+    pub_password: str | None,
+    sub_password: str | None,
+    only_step: int | None,
+    dry_run: bool,
+) -> None:
+    """Execute a repair plan against publisher and subscriber.
+
+    Reads replication-plan.json (or --plan PATH) and runs each step in order,
+    clearly labelling whether each step runs on [PUBLISHER] or [SUBSCRIBER].
+    Use --dry-run to preview all SQL without making changes.
+    Use --step N to apply a single step.
+    """
+    try:
+        cfg = load_config(config or DEFAULT_CONFIG_PATH)
+        rep = cfg.replication
+        if rep is None:
+            click.echo("Error: no [replication] section in config.", err=True)
+            sys.exit(1)
+
+        pub = resolve_instance(cfg, rep.publisher_instance)
+        sub = resolve_instance(cfg, rep.subscriber_instance)
+        pw = _require_password(pub_password, pub.cluster_name)
+        eff_sub_pw = sub_password or pw
+
+        plan = RepairPlan.from_json(plan_path.read_text())
+        steps_to_apply = plan.steps
+        if only_step is not None:
+            steps_to_apply = [s for s in plan.steps if s.step == only_step]
+            if not steps_to_apply:
+                click.echo(f"Error: step {only_step} not found in plan.", err=True)
+                sys.exit(1)
+
+        mode = "[DRY RUN] " if dry_run else ""
+        click.echo(click.style(f"{mode}Applying repair plan...", bold=True))
+        click.echo(f"  [PUBLISHER]  {pub.cluster_name} (port {pub.port})")
+        click.echo(f"  [SUBSCRIBER] {sub.cluster_name} (port {sub.port})")
+        click.echo(f"  Applying {len(steps_to_apply)} step(s)")
+
+        if plan.needs_full_resync and not dry_run:
+            click.echo(
+                click.style(
+                    "\nWARNING: This plan requires a full resync. Steps marked "
+                    "'manual_review' must be reviewed before execution.",
+                    fg="red",
+                )
+            )
+
+        for step in steps_to_apply:
+            apply_repair_step(
+                step=step,
+                publisher=pub,
+                pub_password=pw,
+                subscriber=sub,
+                sub_password=eff_sub_pw,
+                db_name=cfg.database.name,
+                dry_run=dry_run,
+            )
+
+        click.echo("")
+        if dry_run:
+            click.echo("[DRY RUN] Complete — no changes were made.")
+        else:
+            click.echo("Repair plan applied successfully.")
+            click.echo("Run 'replication monitor' to verify replication health.")
+
+    except (FileNotFoundError, KeyError, ValueError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)

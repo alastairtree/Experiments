@@ -281,6 +281,180 @@ uv run postgres-manager query --instance main2 --password "$PGPASSWORD_SUB"
 
 # 7. Monitor replication lag
 uv run postgres-manager replication monitor --password "$PGPASSWORD_PUB"
+
+# 8. Detect schema drift (after evolving tables)
+uv run postgres-manager replication detect-drift \
+  --pub-password "$PGPASSWORD_PUB" --sub-password "$PGPASSWORD_SUB"
+
+# 9. Generate repair plan from drift report
+uv run postgres-manager replication plan-repair
+
+# 10. Review and apply the repair plan
+uv run postgres-manager replication apply-repair \
+  --pub-password "$PGPASSWORD_PUB" --sub-password "$PGPASSWORD_SUB"
+```
+
+---
+
+## Schema evolution
+
+Once replication is running, your schema will change over time. The three
+`schema-evolution` commands help you keep publisher and subscriber in sync.
+
+### Workflow
+
+```
+detect-drift  →  plan-repair  →  apply-repair
+```
+
+1. **`detect-drift`** — read-only scan. Writes `replication-drift.json`.
+2. **`plan-repair`** — turns the drift report into an editable
+   `replication-plan.json` with ordered, phase-annotated steps.
+3. **`apply-repair`** — executes the plan. Supports `--dry-run` and `--step N`.
+
+Each step is clearly labelled `[PUBLISHER]` or `[SUBSCRIBER]` so you always
+know which instance is being modified.
+
+### What drift is detected?
+
+| Drift type | Meaning |
+|------------|---------|
+| `new_unconfigured` | Table exists on publisher but is not in the publication |
+| `dropped_from_publisher` | Table is in the publication config but has been dropped from the publisher DB |
+| `missing_on_subscriber` | Table is in the publication but does not exist on the subscriber |
+| `schema_changed` | Table exists on both sides but columns differ |
+| `no_replica_identity` | Table has no primary key or REPLICA IDENTITY (breaks replication) |
+
+### Repair phases
+
+Steps are grouped into phases and always executed in this order:
+
+| Phase | Target | Action |
+|-------|--------|--------|
+| 1 | **[PUBLISHER]** | Remove dropped tables from publication |
+| 2 | **[SUBSCRIBER]** | CREATE missing tables; ALTER for column changes |
+| 1 | **[PUBLISHER]** | GRANT SELECT + ADD new tables to publication |
+| 3 | **[SUBSCRIBER]** | REFRESH PUBLICATION (or DROP+CREATE if slot invalidated) |
+
+### `replication detect-drift`
+
+Compares the live state of publisher and subscriber. No changes are made.
+
+```bash
+uv run postgres-manager replication detect-drift \
+  --pub-password "$PGPASSWORD_PUB" \
+  --sub-password "$PGPASSWORD_SUB" \
+  --output replication-drift.json     # default
+```
+
+Output:
+```
+Detecting drift...
+  [PUBLISHER]  main1 (port 5432)
+  [SUBSCRIBER] main2 (port 5433)
+  Publication: main1_pub
+  Subscription: main2_sub
+  Database: mydb
+
+Found 2 table(s) with drift:
+
+  public.orders
+    - not in publication (new table?)
+
+  public.users
+    - column differences detected
+    column 'email': missing_on_subscriber
+      publisher type: text
+      suggestion: ALTER TABLE public.users ADD COLUMN email text;
+
+Drift report written to: replication-drift.json
+```
+
+### `replication plan-repair`
+
+Reads `replication-drift.json` and produces a phase-ordered `replication-plan.json`.
+The plan JSON is editable — review it before applying.
+
+```bash
+uv run postgres-manager replication plan-repair \
+  --drift-report replication-drift.json \    # default
+  --output replication-plan.json             # default
+```
+
+Output:
+```
+Repair Plan Summary
+  Publisher:   [main1]
+  Subscriber:  [main2]
+  Steps:       3
+
+  Step 1: Phase 1 | [PUBLISHER] [LOW]
+    [PUBLISHER] Add new table 'public.orders' to publication 'main1_pub'
+      GRANT SELECT ON public.orders TO replicator;
+      ALTER PUBLICATION main1_pub ADD TABLE public.orders;
+
+  Step 2: Phase 2 | [SUBSCRIBER] [MEDIUM]
+    [SUBSCRIBER] Apply schema changes to 'public.users' on subscriber
+      ALTER TABLE public.users ADD COLUMN email text;
+
+  Step 3: Phase 3 | [SUBSCRIBER] [LOW]
+    [SUBSCRIBER] Refresh subscription 'main2_sub' to pick up publication changes
+      ALTER SUBSCRIPTION main2_sub REFRESH PUBLICATION;
+
+Repair plan written to: replication-plan.json
+```
+
+### `replication apply-repair`
+
+Executes the plan step by step. Steps targeting `[PUBLISHER]` run on the
+publisher; steps targeting `[SUBSCRIBER]` run on the subscriber.
+
+```bash
+# Preview without making changes
+uv run postgres-manager replication apply-repair \
+  --pub-password "$PGPASSWORD_PUB" \
+  --sub-password "$PGPASSWORD_SUB" \
+  --dry-run
+
+# Apply all steps
+uv run postgres-manager replication apply-repair \
+  --pub-password "$PGPASSWORD_PUB" \
+  --sub-password "$PGPASSWORD_SUB"
+
+# Apply only step 2 (useful after manual intervention)
+uv run postgres-manager replication apply-repair \
+  --pub-password "$PGPASSWORD_PUB" \
+  --sub-password "$PGPASSWORD_SUB" \
+  --step 2
+```
+
+### Example: adding a new table
+
+```bash
+# 1. Create the new table on the publisher
+uv run postgres-manager create-table --instance main1 ...
+
+# 2. Detect the drift (new table appears as 'new_unconfigured')
+uv run postgres-manager replication detect-drift \
+  --pub-password "$PW1" --sub-password "$PW2"
+
+# 3. Generate the repair plan
+uv run postgres-manager replication plan-repair
+
+# 4. Review the plan, then apply it
+uv run postgres-manager replication apply-repair \
+  --pub-password "$PW1" --sub-password "$PW2"
+```
+
+### Example: column added on publisher
+
+```bash
+# After: ALTER TABLE orders ADD COLUMN discount NUMERIC DEFAULT 0;
+
+uv run postgres-manager replication detect-drift --pub-password "$PW1" --sub-password "$PW2"
+uv run postgres-manager replication plan-repair
+# Review plan — the step is marked [MEDIUM] risk for schema change
+uv run postgres-manager replication apply-repair --pub-password "$PW1" --sub-password "$PW2"
 ```
 
 ---
@@ -354,6 +528,7 @@ uv run pytest tests/test_cli.py -v
 | `tests/test_postgres.py` | `create_database`, `create_table`, `insert_row`, `query_rows` against real PG |
 | `tests/test_cli.py` | All Click commands via `CliRunner` against real PG |
 | `tests/test_replication.py` | Full logical replication workflow via CLI against real PG |
+| `tests/test_schema_evolution.py` | `detect-drift`, `plan-repair`, `apply-repair` against real PG |
 
 Key integration assertions:
 - Each command is called **twice** (once per instance).
