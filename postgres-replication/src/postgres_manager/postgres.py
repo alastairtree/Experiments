@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import sys
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import psycopg
 from psycopg import errors, sql
 
-from .config import AppConfig, InstanceConfig
+from .config import InstanceConfig
 
 
 class PostgresError(Exception):
@@ -22,16 +22,7 @@ def _run(
     check: bool = True,
     capture: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a shell command, printing it first.
-
-    Args:
-        cmd: Command and arguments.
-        check: Whether to raise on non-zero exit.
-        capture: Whether to capture stdout/stderr.
-
-    Returns:
-        CompletedProcess result.
-    """
+    """Run a shell command, printing it first."""
     print(f"  $ {' '.join(cmd)}", file=sys.stderr)
     return subprocess.run(
         cmd,
@@ -39,6 +30,13 @@ def _run(
         text=True,
         capture_output=capture,
     )
+
+
+def _dry(label: str, *lines: str) -> None:
+    """Print dry-run SQL/command lines with a consistent header."""
+    print(f"\n[DRY RUN] {label}:")
+    for line in lines:
+        print(f"  {line}")
 
 
 def add_pgdg_repo() -> None:
@@ -71,12 +69,20 @@ def add_pgdg_repo() -> None:
     print(f"  Added PGDG repository for {codename}.")
 
 
-def install_postgres(pg_version: int) -> None:
+def install_postgres(pg_version: int, dry_run: bool = False) -> None:
     """Install PostgreSQL binaries via apt.
 
     Args:
         pg_version: PostgreSQL major version to install (e.g. 18).
+        dry_run: If True, print commands without executing.
     """
+    if dry_run:
+        _dry(
+            f"install PostgreSQL {pg_version}",
+            "apt-get update -qq",
+            f"apt-get install -y postgresql-{pg_version} postgresql-common",
+        )
+        return
     print(f"Installing PostgreSQL {pg_version}...")
     _run(["apt-get", "update", "-qq"])
     _run([
@@ -88,15 +94,7 @@ def install_postgres(pg_version: int) -> None:
 
 
 def cluster_exists(pg_version: int, cluster_name: str) -> bool:
-    """Check if a PostgreSQL cluster exists.
-
-    Args:
-        pg_version: PostgreSQL major version.
-        cluster_name: Cluster name.
-
-    Returns:
-        True if cluster exists.
-    """
+    """Check if a PostgreSQL cluster exists."""
     result = _run(
         ["pg_lsclusters", "-h"],
         check=False,
@@ -111,22 +109,19 @@ def cluster_exists(pg_version: int, cluster_name: str) -> bool:
     return False
 
 
-def create_cluster(pg_version: int, instance: InstanceConfig) -> None:
+def create_cluster(
+    pg_version: int,
+    instance: InstanceConfig,
+    dry_run: bool = False,
+) -> None:
     """Create a PostgreSQL cluster using pg_createcluster.
-
-    Initialises a new cluster with trust-based local auth so the start
-    command can connect via socket without a password to bootstrap users.
 
     Args:
         pg_version: PostgreSQL major version.
         instance: Instance configuration.
+        dry_run: If True, print commands without executing.
     """
-    if cluster_exists(pg_version, instance.cluster_name):
-        print(f"  Cluster {pg_version}/{instance.cluster_name} already exists, skipping.")
-        return
-
-    print(f"Creating cluster {pg_version}/{instance.cluster_name} on port {instance.port}...")
-    _run([
+    cmd = [
         "pg_createcluster",
         str(pg_version),
         instance.cluster_name,
@@ -134,30 +129,65 @@ def create_cluster(pg_version: int, instance: InstanceConfig) -> None:
         "--",
         "--auth-local=trust",
         "--auth-host=scram-sha-256",
-    ])
+    ]
+    if dry_run:
+        _dry(
+            f"create cluster {pg_version}/{instance.cluster_name}",
+            " ".join(cmd),
+        )
+        return
+
+    if cluster_exists(pg_version, instance.cluster_name):
+        print(f"  Cluster {pg_version}/{instance.cluster_name} already exists, skipping.")
+        return
+
+    print(f"Creating cluster {pg_version}/{instance.cluster_name} on port {instance.port}...")
+    _run(cmd)
     print(f"  Cluster {pg_version}/{instance.cluster_name} created.")
 
 
-def start_cluster(pg_version: int, cluster_name: str) -> None:
+def start_cluster(
+    pg_version: int,
+    cluster_name: str,
+    dry_run: bool = False,
+) -> None:
     """Start a PostgreSQL cluster.
 
     Args:
         pg_version: PostgreSQL major version.
         cluster_name: Cluster name.
+        dry_run: If True, print commands without executing.
     """
+    if dry_run:
+        _dry(
+            f"start cluster {pg_version}/{cluster_name}",
+            f"pg_ctlcluster {pg_version} {cluster_name} start",
+        )
+        return
     print(f"Starting cluster {pg_version}/{cluster_name}...")
     _run(["pg_ctlcluster", str(pg_version), cluster_name, "start"])
     time.sleep(2)
     print(f"  Cluster {pg_version}/{cluster_name} started.")
 
 
-def stop_cluster(pg_version: int, cluster_name: str) -> None:
+def stop_cluster(
+    pg_version: int,
+    cluster_name: str,
+    dry_run: bool = False,
+) -> None:
     """Stop a PostgreSQL cluster.
 
     Args:
         pg_version: PostgreSQL major version.
         cluster_name: Cluster name.
+        dry_run: If True, print commands without executing.
     """
+    if dry_run:
+        _dry(
+            f"stop cluster {pg_version}/{cluster_name}",
+            f"pg_ctlcluster {pg_version} {cluster_name} stop -- -m fast",
+        )
+        return
     print(f"Stopping cluster {pg_version}/{cluster_name}...")
     _run(
         ["pg_ctlcluster", str(pg_version), cluster_name, "stop", "--", "-m", "fast"],
@@ -166,19 +196,8 @@ def stop_cluster(pg_version: int, cluster_name: str) -> None:
     print(f"  Cluster {pg_version}/{cluster_name} stopped.")
 
 
-def _socket_connect(
-    port: int,
-    user: str = "postgres",
-) -> psycopg.Connection[tuple[object, ...]]:
-    """Connect to PostgreSQL via unix socket (peer/trust auth).
-
-    Args:
-        port: Port number.
-        user: Database user.
-
-    Returns:
-        Open psycopg connection with autocommit enabled.
-    """
+def _socket_connect(port: int, user: str = "postgres") -> psycopg.Connection[tuple[object, ...]]:
+    """Connect to PostgreSQL via unix socket (peer/trust auth)."""
     conn: psycopg.Connection[tuple[object, ...]] = psycopg.connect(
         host="/var/run/postgresql",
         port=port,
@@ -189,17 +208,28 @@ def _socket_connect(
     return conn
 
 
-def create_admin_user(instance: InstanceConfig, password: str) -> None:
+def create_admin_user(
+    instance: InstanceConfig,
+    password: str,
+    dry_run: bool = False,
+) -> None:
     """Create the admin user in an instance with the supplied password.
 
     Args:
         instance: Instance configuration.
         password: Password to set for the admin user.
+        dry_run: If True, print SQL without executing.
     """
+    if dry_run:
+        _dry(
+            f"create admin user on {instance.cluster_name} port {instance.port} (unix socket)",
+            f'CREATE ROLE "{instance.admin_user}" WITH LOGIN SUPERUSER PASSWORD \'***\';',
+            "-- or if role already exists:",
+            f'ALTER ROLE "{instance.admin_user}" WITH LOGIN SUPERUSER PASSWORD \'***\';',
+        )
+        return
     print(f"  Creating admin user '{instance.admin_user}' on port {instance.port}...")
     role_ident = sql.Identifier(instance.admin_user)
-    # PostgreSQL DDL (CREATE/ALTER ROLE) does not accept $N parameters;
-    # use sql.Literal so psycopg safely quotes and escapes the password value.
     pw_literal = sql.Literal(password)
     with _socket_connect(instance.port) as conn:
         try:
@@ -222,16 +252,7 @@ def _tcp_connect(
     password: str,
     database: str = "postgres",
 ) -> psycopg.Connection[tuple[object, ...]]:
-    """Connect to PostgreSQL via TCP using admin credentials.
-
-    Args:
-        instance: Instance configuration.
-        password: Admin user password.
-        database: Database to connect to.
-
-    Returns:
-        Open psycopg connection with autocommit enabled.
-    """
+    """Connect to PostgreSQL via TCP using admin credentials."""
     conn: psycopg.Connection[tuple[object, ...]] = psycopg.connect(
         host="localhost",
         port=instance.port,
@@ -243,14 +264,26 @@ def _tcp_connect(
     return conn
 
 
-def create_database(instance: InstanceConfig, password: str, db_name: str) -> None:
+def create_database(
+    instance: InstanceConfig,
+    password: str,
+    db_name: str,
+    dry_run: bool = False,
+) -> None:
     """Create a database if it does not already exist.
 
     Args:
         instance: Instance configuration.
         password: Admin user password.
         db_name: Name of the database to create.
+        dry_run: If True, print SQL without executing.
     """
+    if dry_run:
+        _dry(
+            f"create database on {instance.cluster_name} port {instance.port}",
+            f'CREATE DATABASE "{db_name}";',
+        )
+        return
     print(f"  Creating database '{db_name}' on port {instance.port}...")
     with _tcp_connect(instance, password) as conn:
         result = conn.execute(
@@ -271,6 +304,7 @@ def create_table(
     password: str,
     db_name: str,
     table_name: str,
+    dry_run: bool = False,
 ) -> None:
     """Create the demo table in the specified database.
 
@@ -279,7 +313,19 @@ def create_table(
         password: Admin user password.
         db_name: Database name.
         table_name: Table name.
+        dry_run: If True, print SQL without executing.
     """
+    if dry_run:
+        _dry(
+            f"create table on {instance.cluster_name} port {instance.port}, db {db_name}",
+            f'CREATE TABLE IF NOT EXISTS "{table_name}" (',
+            "    id        SERIAL PRIMARY KEY,",
+            "    instance  TEXT        NOT NULL,",
+            "    message   TEXT        NOT NULL,",
+            "    created   TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+            ");",
+        )
+        return
     print(f"  Creating table '{table_name}' in '{db_name}' on port {instance.port}...")
     with _tcp_connect(instance, password, db_name) as conn:
         conn.execute(
@@ -303,6 +349,7 @@ def insert_row(
     db_name: str,
     table_name: str,
     message: str,
+    dry_run: bool = False,
 ) -> int:
     """Insert a row into the demo table and return the new id.
 
@@ -312,10 +359,18 @@ def insert_row(
         db_name: Database name.
         table_name: Table name.
         message: Message to insert.
+        dry_run: If True, print SQL without executing.
 
     Returns:
-        The id of the newly inserted row.
+        The id of the newly inserted row (0 for dry-run).
     """
+    if dry_run:
+        _dry(
+            f"insert row on {instance.cluster_name} port {instance.port}, db {db_name}",
+            f"INSERT INTO \"{table_name}\" (instance, message)",
+            f"  VALUES ('{instance.cluster_name}', '{message}') RETURNING id;",
+        )
+        return 0
     print(f"  Inserting row into '{table_name}' on port {instance.port}...")
     with _tcp_connect(instance, password, db_name) as conn:
         row = conn.execute(

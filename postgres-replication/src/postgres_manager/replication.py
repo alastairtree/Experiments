@@ -37,6 +37,20 @@ def _tcp_connect(
     return conn
 
 
+def _dry(label: str, *lines: str) -> None:
+    """Print dry-run SQL/command lines with a consistent header."""
+    print(f"\n[DRY RUN] {label}:")
+    for line in lines:
+        print(f"  {line}")
+
+
+def _as_int(val: object) -> int:
+    """Cast an opaque dict value to int safely."""
+    if isinstance(val, int):
+        return val
+    return int(str(val))
+
+
 # ---------------------------------------------------------------------------
 # Table inspection
 # ---------------------------------------------------------------------------
@@ -137,9 +151,6 @@ def get_table_ddl(
 ) -> str:
     """Build a ``CREATE TABLE IF NOT EXISTS`` statement from live column metadata.
 
-    Fetches column types, nullability, and primary-key membership from
-    ``information_schema`` and constructs a portable DDL string.
-
     Args:
         instance: Instance configuration (the publisher).
         password: Admin password.
@@ -201,6 +212,7 @@ def create_table_on_subscriber(
     db_name: str,
     schema: str,
     table: str,
+    dry_run: bool = False,
 ) -> None:
     """Create a table on the subscriber using DDL derived from the publisher.
 
@@ -212,8 +224,16 @@ def create_table_on_subscriber(
         db_name: Database name (must already exist on subscriber).
         schema: Table schema.
         table: Table name.
+        dry_run: If True, print DDL without executing.
     """
     ddl = get_table_ddl(publisher, pub_password, db_name, schema, table)
+    if dry_run:
+        _dry(
+            f"create table on subscriber {subscriber.cluster_name} port {subscriber.port},"
+            f" db {db_name}",
+            f"{ddl};",
+        )
+        return
     print(f"  Creating table '{schema}.{table}' on subscriber...")
     with _tcp_connect(subscriber, sub_password, db_name) as conn:
         conn.execute(ddl.encode())
@@ -229,6 +249,7 @@ def ensure_wal_logical(
     cluster_name: str,
     instance: InstanceConfig,
     password: str,
+    dry_run: bool = False,
 ) -> bool:
     """Ensure ``wal_level = logical`` on a cluster, restarting if needed.
 
@@ -237,10 +258,22 @@ def ensure_wal_logical(
         cluster_name: Cluster name.
         instance: Instance configuration (used to check current setting).
         password: Admin password.
+        dry_run: If True, print commands without executing.
 
     Returns:
         ``True`` if the cluster was restarted, ``False`` if already logical.
     """
+    if dry_run:
+        _dry(
+            f"ensure wal_level=logical on {cluster_name} port {instance.port}",
+            "-- Check current setting:",
+            "SHOW wal_level;",
+            "-- If not already logical:",
+            "ALTER SYSTEM SET wal_level = 'logical';",
+            f"-- pg_ctlcluster {pg_version} {cluster_name} restart",
+        )
+        return False
+
     with _tcp_connect(instance, password) as conn:
         row = conn.execute("SHOW wal_level").fetchone()
         current = str(row[0]) if row else ""
@@ -276,6 +309,7 @@ def create_replication_user(
     replication_password: str,
     db_name: str,
     tables: list[tuple[str, str]],
+    dry_run: bool = False,
 ) -> None:
     """Create (or update) a replication role and grant required privileges.
 
@@ -286,7 +320,24 @@ def create_replication_user(
         replication_password: Password for the replication role.
         db_name: Database where tables live.
         tables: List of ``(schema, table)`` pairs to grant SELECT on.
+        dry_run: If True, print SQL without executing.
     """
+    if dry_run:
+        grant_lines = [
+            f'GRANT CONNECT ON DATABASE "{db_name}" TO "{replication_user}";',
+        ] + [
+            f'GRANT SELECT ON "{s}"."{t}" TO "{replication_user}";'
+            for s, t in tables
+        ]
+        _dry(
+            f"create replication user on {instance.cluster_name} port {instance.port}",
+            f'CREATE ROLE "{replication_user}" WITH LOGIN REPLICATION PASSWORD \'***\';',
+            "-- or if role already exists:",
+            f'ALTER ROLE "{replication_user}" WITH LOGIN REPLICATION PASSWORD \'***\';',
+            *grant_lines,
+        )
+        return
+
     role_ident = sql.Identifier(replication_user)
     pw_literal = sql.Literal(replication_password)
 
@@ -328,6 +379,7 @@ def setup_publication(
     db_name: str,
     publication_name: str,
     tables: list[tuple[str, str]],
+    dry_run: bool = False,
 ) -> None:
     """Drop-and-recreate a publication for the specified tables.
 
@@ -337,7 +389,17 @@ def setup_publication(
         db_name: Database name.
         publication_name: Publication name.
         tables: List of ``(schema, table)`` pairs to publish.
+        dry_run: If True, print SQL without executing.
     """
+    table_refs = ", ".join(f'"{s}"."{t}"' for s, t in tables)
+    if dry_run:
+        _dry(
+            f"setup publication on {instance.cluster_name} port {instance.port}, db {db_name}",
+            f'DROP PUBLICATION IF EXISTS "{publication_name}";',
+            f'CREATE PUBLICATION "{publication_name}" FOR TABLE {table_refs};',
+        )
+        return
+
     pub_ident = sql.Identifier(publication_name)
     table_parts = [
         sql.SQL("{}.{}").format(sql.Identifier(s), sql.Identifier(t))
@@ -373,6 +435,7 @@ def setup_subscription(
     replication_user: str,
     replication_password: str,
     publication_name: str,
+    dry_run: bool = False,
 ) -> None:
     """Drop-and-recreate a subscription on the subscriber.
 
@@ -386,18 +449,36 @@ def setup_subscription(
         replication_user: Replication user name.
         replication_password: Replication user password.
         publication_name: Name of the publication on the publisher.
+        dry_run: If True, print SQL without executing.
     """
-    sub_ident = sql.Identifier(subscription_name)
     connstr = (
+        f"host={publisher_host} "
+        f"port={publisher_port} "
+        f"user={replication_user} "
+        f"password=*** "
+        f"dbname={db_name}"
+    )
+    if dry_run:
+        _dry(
+            f"setup subscription on {subscriber.cluster_name} port {subscriber.port},"
+            f" db {db_name}",
+            f'DROP SUBSCRIPTION IF EXISTS "{subscription_name}";',
+            f'CREATE SUBSCRIPTION "{subscription_name}"',
+            f"    CONNECTION '{connstr}'",
+            f'    PUBLICATION "{publication_name}";',
+        )
+        return
+
+    real_connstr = (
         f"host={publisher_host} "
         f"port={publisher_port} "
         f"user={replication_user} "
         f"password={replication_password} "
         f"dbname={db_name}"
     )
+    sub_ident = sql.Identifier(subscription_name)
 
     with _tcp_connect(subscriber, sub_password, db_name) as conn:
-        # DROP first; autocommit=True so each statement is its own txn
         conn.execute(
             sql.SQL("DROP SUBSCRIPTION IF EXISTS {}").format(sub_ident)
         )
@@ -406,7 +487,7 @@ def setup_subscription(
                 "CREATE SUBSCRIPTION {} CONNECTION {} PUBLICATION {}"
             ).format(
                 sub_ident,
-                sql.Literal(connstr),
+                sql.Literal(real_connstr),
                 sql.Identifier(publication_name),
             )
         )
@@ -415,7 +496,7 @@ def setup_subscription(
 
 
 # ---------------------------------------------------------------------------
-# Monitor
+# Monitor: stats
 # ---------------------------------------------------------------------------
 
 
@@ -485,3 +566,231 @@ def get_replication_stats(
         slots = [dict(zip(slot_cols, row)) for row in slot_rows]
 
     return connections, slots
+
+
+# ---------------------------------------------------------------------------
+# Monitor: row counts
+# ---------------------------------------------------------------------------
+
+
+def get_row_counts(
+    instance: InstanceConfig,
+    password: str,
+    db_name: str,
+    tables: list[tuple[str, str]],
+) -> dict[tuple[str, str], int]:
+    """Count rows in each table.
+
+    Returns -1 for tables that cannot be counted (e.g. table doesn't exist yet).
+
+    Args:
+        instance: Instance configuration.
+        password: Admin password.
+        db_name: Database name.
+        tables: List of ``(schema, table)`` tuples.
+
+    Returns:
+        Dict mapping ``(schema, table)`` to row count (or -1 on error).
+    """
+    counts: dict[tuple[str, str], int] = {}
+    with _tcp_connect(instance, password, db_name) as conn:
+        for schema, table in tables:
+            try:
+                row = conn.execute(
+                    sql.SQL("SELECT COUNT(*) FROM {}.{}").format(
+                        sql.Identifier(schema), sql.Identifier(table)
+                    )
+                ).fetchone()
+                counts[(schema, table)] = _as_int(row[0]) if row else 0
+            except Exception:
+                counts[(schema, table)] = -1
+    return counts
+
+
+def get_pk_columns(
+    instance: InstanceConfig,
+    password: str,
+    db_name: str,
+    schema: str,
+    table: str,
+) -> list[str]:
+    """Return primary key column names for a table.
+
+    Args:
+        instance: Instance configuration.
+        password: Admin password.
+        db_name: Database name.
+        schema: Table schema.
+        table: Table name.
+
+    Returns:
+        Ordered list of primary key column names.
+    """
+    with _tcp_connect(instance, password, db_name) as conn:
+        rows = conn.execute(
+            """
+            SELECT kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+               AND tc.table_schema    = kcu.table_schema
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+              AND tc.table_schema    = %s
+              AND tc.table_name      = %s
+            ORDER BY kcu.ordinal_position
+            """,
+            (schema, table),
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def get_max_pk_values(
+    instance: InstanceConfig,
+    password: str,
+    db_name: str,
+    schema: str,
+    table: str,
+    pk_cols: list[str],
+) -> dict[str, object]:
+    """Get the maximum value of each primary key column.
+
+    Args:
+        instance: Instance configuration.
+        password: Admin password.
+        db_name: Database name.
+        schema: Table schema.
+        table: Table name.
+        pk_cols: Primary key column names.
+
+    Returns:
+        Dict mapping column name to its maximum value (or None).
+    """
+    if not pk_cols:
+        return {}
+    result: dict[str, object] = {}
+    with _tcp_connect(instance, password, db_name) as conn:
+        for col in pk_cols:
+            try:
+                row = conn.execute(
+                    sql.SQL("SELECT MAX({}) FROM {}.{}").format(
+                        sql.Identifier(col),
+                        sql.Identifier(schema),
+                        sql.Identifier(table),
+                    )
+                ).fetchone()
+                result[col] = row[0] if row else None
+            except Exception:
+                result[col] = None
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Polling: wait for replication to catch up
+# ---------------------------------------------------------------------------
+
+
+def _format_bytes(n: int) -> str:
+    """Human-readable byte size."""
+    if n >= 1024 * 1024:
+        return f"{n / 1024 / 1024:.1f} MB"
+    if n >= 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n} B"
+
+
+def _format_rate(rate: float) -> str:
+    """Human-readable bytes-per-second rate."""
+    if rate >= 1024 * 1024:
+        return f"{rate / 1024 / 1024:.1f} MB/s"
+    if rate >= 1024:
+        return f"{rate / 1024:.1f} KB/s"
+    return f"{rate:.0f} B/s"
+
+
+def _format_eta(eta_secs: float) -> str:
+    """Human-readable estimated time."""
+    if eta_secs < 60:
+        return f"~{eta_secs:.0f}s"
+    if eta_secs < 3600:
+        return f"~{eta_secs / 60:.1f}m"
+    return f"~{eta_secs / 3600:.1f}h"
+
+
+def poll_until_caught_up(
+    publisher: InstanceConfig,
+    password: str,
+    max_seconds: int = 30,
+    poll_interval: float = 2.0,
+) -> None:
+    """Poll replication lag every ``poll_interval`` seconds until caught up or timeout.
+
+    Prints a progress line on each poll showing bytes remaining, estimated
+    throughput, and estimated time to completion.  Stops when lag reaches zero
+    or ``max_seconds`` elapses.
+
+    Args:
+        publisher: Publisher instance to query.
+        password: Publisher admin password.
+        max_seconds: Maximum seconds to wait.
+        poll_interval: Seconds between polls.
+    """
+    _, slots = get_replication_stats(publisher, password)
+    if not slots:
+        print("  No logical replication slots found.")
+        return
+
+    total_lag = sum(_as_int(s["lag_bytes"]) for s in slots)
+    if total_lag == 0:
+        print("  Replication is already caught up (0 bytes lag).")
+        return
+
+    print(f"\n  Monitoring replication catch-up (up to {max_seconds}s)...")
+    print(f"  Initial lag: {_format_bytes(total_lag)}")
+    print(f"  {'Elapsed':>7}  {'Remaining':>12}  {'Rate':>12}  {'ETA':>10}  Status")
+    print(f"  {'-'*7}  {'-'*12}  {'-'*12}  {'-'*10}  ------")
+
+    start = time.monotonic()
+    prev_lag = total_lag
+    prev_time = start
+
+    while True:
+        time.sleep(poll_interval)
+
+        elapsed = time.monotonic() - start
+        _, slots = get_replication_stats(publisher, password)
+        total_lag = sum(_as_int(s["lag_bytes"]) for s in slots)
+        now = time.monotonic()
+        dt = now - prev_time
+        delta_bytes = prev_lag - total_lag
+
+        if delta_bytes > 0 and dt > 0:
+            rate = delta_bytes / dt
+            eta_str = _format_eta(total_lag / rate) if total_lag > 0 else "done"
+            rate_str = _format_rate(rate)
+        else:
+            rate_str = "0 B/s"
+            eta_str = "done" if total_lag == 0 else "unknown"
+
+        active = any(s["active"] for s in slots)
+        status = "active" if active else "INACTIVE"
+        remaining_str = _format_bytes(total_lag) if total_lag > 0 else "0 B"
+
+        print(
+            f"  {elapsed:>6.0f}s  {remaining_str:>12}  {rate_str:>12}"
+            f"  {eta_str:>10}  {status}"
+        )
+        sys.stdout.flush()
+
+        prev_lag = total_lag
+        prev_time = now
+
+        if total_lag == 0:
+            print("  Replication fully caught up!")
+            break
+
+        if elapsed >= max_seconds:
+            print(
+                f"  Monitoring stopped after {max_seconds}s."
+                f" Remaining lag: {_format_bytes(total_lag)}"
+            )
+            break

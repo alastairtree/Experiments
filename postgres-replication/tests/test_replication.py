@@ -618,3 +618,391 @@ class TestReplicationMonitorCLI:
             "--password", TEST_PASSWORD_1,
         ])
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# Sensible default names
+# ---------------------------------------------------------------------------
+
+
+class TestSensibleDefaults:
+    def test_prepare_generates_default_publication_and_subscription_names(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """When --publication-name / --subscription-name are omitted, use auto names."""
+        _create_db(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB)
+        _create_demo_table(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB, TEST_TABLE)
+        _create_db(TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2, TEST_DB)
+
+        result = _invoke(runner, [
+            "replication", "prepare",
+            "--config", str(repl_config_path),
+            "--publisher", TEST_CLUSTER_1,
+            "--subscriber", TEST_CLUSTER_2,
+            "--pub-password", TEST_PASSWORD_1,
+            "--sub-password", TEST_PASSWORD_2,
+            # omit --publication-name and --subscription-name
+        ])
+        assert result.exit_code == 0, result.output  # type: ignore[union-attr]
+
+        cfg = load_config(repl_config_path)
+        assert cfg.replication is not None
+        assert cfg.replication.publication_name == f"{TEST_CLUSTER_1}_pub"
+        assert cfg.replication.subscription_name == f"{TEST_CLUSTER_2}_sub"
+        assert cfg.replication.replication_user == "replicator"
+
+    def test_prepare_default_names_shown_in_output(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """The auto-generated names are printed so the user can review them."""
+        _create_db(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB)
+        _create_demo_table(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB, TEST_TABLE)
+        _create_db(TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2, TEST_DB)
+
+        result = _invoke(runner, [
+            "replication", "prepare",
+            "--config", str(repl_config_path),
+            "--publisher", TEST_CLUSTER_1,
+            "--subscriber", TEST_CLUSTER_2,
+            "--pub-password", TEST_PASSWORD_1,
+            "--sub-password", TEST_PASSWORD_2,
+        ])
+        assert result.exit_code == 0, result.output  # type: ignore[union-attr]
+        out = result.output  # type: ignore[union-attr]
+        assert f"{TEST_CLUSTER_1}_pub" in out
+        assert f"{TEST_CLUSTER_2}_sub" in out
+
+
+# ---------------------------------------------------------------------------
+# Dry-run tests
+# ---------------------------------------------------------------------------
+
+
+class TestDryRun:
+    def test_create_table_dry_run_prints_sql_without_creating(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """--dry-run must print SQL and not create the database or table."""
+        result = runner.invoke(main, [
+            "create-table",
+            "--config", str(repl_config_path),
+            "--instance", TEST_CLUSTER_1,
+            "--password", TEST_PASSWORD_1,
+            "--dry-run",
+        ], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert "[DRY RUN]" in result.output
+        assert "CREATE TABLE" in result.output
+
+        # The database must NOT have been created
+        with _tcp_connect(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s", (TEST_DB,)
+            ).fetchone()
+        assert row is None
+
+    def test_insert_dry_run_prints_sql_without_inserting(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """--dry-run must print the INSERT and not modify the table."""
+        # First create the table for real
+        _create_db(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB)
+        _create_demo_table(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB, TEST_TABLE)
+
+        result = runner.invoke(main, [
+            "insert",
+            "--config", str(repl_config_path),
+            "--instance", TEST_CLUSTER_1,
+            "--password", TEST_PASSWORD_1,
+            "--message", "dry run msg",
+            "--dry-run",
+        ], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert "[DRY RUN]" in result.output
+        assert "INSERT" in result.output
+
+        # No rows must have been inserted
+        msgs = _fetch_messages(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB, TEST_TABLE)
+        assert msgs == []
+
+    def test_replication_prepare_dry_run_does_not_write_config(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """prepare --dry-run must not write [replication] to config.toml."""
+        _create_db(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB)
+        _create_demo_table(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB, TEST_TABLE)
+        _create_db(TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2, TEST_DB)
+
+        config_before = repl_config_path.read_text()
+
+        result = runner.invoke(main, [
+            "replication", "prepare",
+            "--config", str(repl_config_path),
+            "--publisher", TEST_CLUSTER_1,
+            "--subscriber", TEST_CLUSTER_2,
+            "--pub-password", TEST_PASSWORD_1,
+            "--sub-password", TEST_PASSWORD_2,
+            "--dry-run",
+        ], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert "[DRY RUN]" in result.output
+
+        # Config file must not have changed
+        config_after = repl_config_path.read_text()
+        assert config_after == config_before
+
+    def test_replication_setup_publisher_dry_run_prints_sql_no_changes(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """setup-publisher --dry-run must not create the publication or replication user."""
+        _create_db(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB)
+        _create_demo_table(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB, TEST_TABLE)
+        _create_db(TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2, TEST_DB)
+
+        # Real prepare to populate config
+        _invoke(runner, [
+            "replication", "prepare",
+            "--config", str(repl_config_path),
+            "--publisher", TEST_CLUSTER_1,
+            "--subscriber", TEST_CLUSTER_2,
+            "--pub-password", TEST_PASSWORD_1,
+            "--sub-password", TEST_PASSWORD_2,
+            "--replication-user", TEST_REPL_USER,
+            "--publication-name", TEST_PUBLICATION,
+            "--subscription-name", TEST_SUBSCRIPTION,
+        ])
+
+        result = runner.invoke(main, [
+            "replication", "setup-publisher",
+            "--config", str(repl_config_path),
+            "--password", TEST_PASSWORD_1,
+            "--replication-password", TEST_REPL_PASSWORD,
+            "--dry-run",
+        ], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert "[DRY RUN]" in result.output
+        assert "CREATE PUBLICATION" in result.output
+
+        # The publication must NOT exist
+        with _tcp_connect(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB) as conn:
+            row = conn.execute(
+                "SELECT pubname FROM pg_publication WHERE pubname = %s",
+                (TEST_PUBLICATION,),
+            ).fetchone()
+        assert row is None
+
+    def test_replication_setup_subscriber_dry_run_prints_sql_no_subscription(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """setup-subscriber --dry-run must not create the subscription."""
+        _full_setup(
+            TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1,
+            TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2,
+        )
+        _invoke(runner, [
+            "replication", "prepare",
+            "--config", str(repl_config_path),
+            "--publisher", TEST_CLUSTER_1,
+            "--subscriber", TEST_CLUSTER_2,
+            "--pub-password", TEST_PASSWORD_1,
+            "--sub-password", TEST_PASSWORD_2,
+            "--replication-user", TEST_REPL_USER,
+            "--publication-name", TEST_PUBLICATION,
+            "--subscription-name", TEST_SUBSCRIPTION,
+        ])
+        _invoke(runner, [
+            "replication", "setup-publisher",
+            "--config", str(repl_config_path),
+            "--password", TEST_PASSWORD_1,
+            "--replication-password", TEST_REPL_PASSWORD,
+        ])
+
+        result = runner.invoke(main, [
+            "replication", "setup-subscriber",
+            "--config", str(repl_config_path),
+            "--password", TEST_PASSWORD_2,
+            "--replication-password", TEST_REPL_PASSWORD,
+            "--pub-password", TEST_PASSWORD_1,
+            "--dry-run",
+        ], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert "[DRY RUN]" in result.output
+        assert "CREATE SUBSCRIPTION" in result.output
+
+        # The subscription must NOT exist
+        with _tcp_connect(TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2, TEST_DB) as conn:
+            row = conn.execute(
+                "SELECT subname FROM pg_subscription WHERE subname = %s",
+                (TEST_SUBSCRIPTION,),
+            ).fetchone()
+        assert row is None
+
+
+# ---------------------------------------------------------------------------
+# --counts flag on monitor
+# ---------------------------------------------------------------------------
+
+
+class TestMonitorCounts:
+    def _full_replication_setup(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+    ) -> None:
+        _full_setup(
+            TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1,
+            TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2,
+        )
+        _invoke(runner, [
+            "replication", "prepare",
+            "--config", str(repl_config_path),
+            "--publisher", TEST_CLUSTER_1,
+            "--subscriber", TEST_CLUSTER_2,
+            "--pub-password", TEST_PASSWORD_1,
+            "--sub-password", TEST_PASSWORD_2,
+            "--replication-user", TEST_REPL_USER,
+            "--publication-name", TEST_PUBLICATION,
+            "--subscription-name", TEST_SUBSCRIPTION,
+        ])
+        _invoke(runner, [
+            "replication", "setup-publisher",
+            "--config", str(repl_config_path),
+            "--password", TEST_PASSWORD_1,
+            "--replication-password", TEST_REPL_PASSWORD,
+        ])
+        _invoke(runner, [
+            "replication", "setup-subscriber",
+            "--config", str(repl_config_path),
+            "--password", TEST_PASSWORD_2,
+            "--replication-password", TEST_REPL_PASSWORD,
+            "--pub-password", TEST_PASSWORD_1,
+        ])
+
+    def test_counts_shows_row_count_table(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """--counts must display a table with publisher and subscriber counts."""
+        self._full_replication_setup(runner, repl_config_path)
+        time.sleep(2)  # let subscription sync
+
+        # Insert a row on the publisher and wait for it to replicate
+        _insert_row(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB, TEST_TABLE, "count-me")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if _fetch_messages(TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2, TEST_DB, TEST_TABLE):
+                break
+            time.sleep(0.5)
+
+        result = _invoke(runner, [
+            "replication", "monitor",
+            "--config", str(repl_config_path),
+            "--password", TEST_PASSWORD_1,
+            "--sub-password", TEST_PASSWORD_2,
+            "--counts",
+        ])
+        assert result.exit_code == 0, result.output  # type: ignore[union-attr]
+        out = result.output  # type: ignore[union-attr]
+        assert "Row count comparison" in out
+        assert "Publisher" in out
+        assert "Subscriber" in out
+
+    def test_counts_highlights_mismatch(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """--counts must mark rows where publisher != subscriber count."""
+        self._full_replication_setup(runner, repl_config_path)
+        time.sleep(2)
+
+        # Drop the subscription so replication stops, then insert on publisher.
+        # This guarantees publisher count > subscriber count.
+        _drop_subscription(TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2, TEST_DB, TEST_SUBSCRIPTION)
+        _insert_row(TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1, TEST_DB, TEST_TABLE,
+                    "publisher-only-row")
+
+        result = _invoke(runner, [
+            "replication", "monitor",
+            "--config", str(repl_config_path),
+            "--password", TEST_PASSWORD_1,
+            "--sub-password", TEST_PASSWORD_2,
+            "--counts",
+        ])
+        assert result.exit_code == 0, result.output  # type: ignore[union-attr]
+        out = result.output  # type: ignore[union-attr]
+        assert "Row count comparison" in out
+        # When there's a mismatch, "MISMATCH" and max PK info appear
+        assert "MISMATCH" in out
+
+
+# ---------------------------------------------------------------------------
+# Polling after setup-subscriber
+# ---------------------------------------------------------------------------
+
+
+class TestPolling:
+    def test_setup_subscriber_output_includes_catch_up_info(
+        self,
+        runner: CliRunner,
+        repl_config_path: Path,
+        pg_instances: dict[str, object],
+    ) -> None:
+        """setup-subscriber must print 'catch-up' monitoring output."""
+        _full_setup(
+            TEST_PORT_1, TEST_ADMIN_1, TEST_PASSWORD_1,
+            TEST_PORT_2, TEST_ADMIN_2, TEST_PASSWORD_2,
+        )
+        _invoke(runner, [
+            "replication", "prepare",
+            "--config", str(repl_config_path),
+            "--publisher", TEST_CLUSTER_1,
+            "--subscriber", TEST_CLUSTER_2,
+            "--pub-password", TEST_PASSWORD_1,
+            "--sub-password", TEST_PASSWORD_2,
+            "--replication-user", TEST_REPL_USER,
+            "--publication-name", TEST_PUBLICATION,
+            "--subscription-name", TEST_SUBSCRIPTION,
+        ])
+        _invoke(runner, [
+            "replication", "setup-publisher",
+            "--config", str(repl_config_path),
+            "--password", TEST_PASSWORD_1,
+            "--replication-password", TEST_REPL_PASSWORD,
+        ])
+
+        result = _invoke(runner, [
+            "replication", "setup-subscriber",
+            "--config", str(repl_config_path),
+            "--password", TEST_PASSWORD_2,
+            "--replication-password", TEST_REPL_PASSWORD,
+            "--pub-password", TEST_PASSWORD_1,
+        ])
+        assert result.exit_code == 0, result.output  # type: ignore[union-attr]
+        out = result.output  # type: ignore[union-attr]
+        # Must mention catch-up monitoring
+        assert "catch" in out.lower() or "lag" in out.lower() or "caught up" in out.lower()
