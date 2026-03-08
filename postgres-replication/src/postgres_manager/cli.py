@@ -9,7 +9,10 @@ from pathlib import Path
 import click
 
 from .config import (
+    DEFAULT_CONFIG_DIR,
     DEFAULT_CONFIG_PATH,
+    DEFAULT_PLAN_PATH,
+    InstanceConfig,
     ReplicationConfig,
     load_config,
     resolve_instance,
@@ -759,10 +762,10 @@ def replication_monitor(
 @click.option(
     "--output",
     "-o",
-    default="replication-plan.json",
-    show_default=True,
+    default=None,
+    show_default=False,
     type=click.Path(dir_okay=False, writable=True, path_type=Path),
-    help="Path to write the repair plan JSON.",
+    help=f"Path to write the repair plan JSON. Defaults to {DEFAULT_PLAN_PATH}.",
 )
 @click.option(
     "--save-drift",
@@ -774,7 +777,7 @@ def replication_plan_repair(
     config: Path | None,
     pub_password: str | None,
     sub_password: str | None,
-    output: Path,
+    output: Path | None,
     save_drift: Path | None,
 ) -> None:
     """Detect schema drift and generate an ordered repair plan in one step.
@@ -804,6 +807,9 @@ def replication_plan_repair(
         sub = resolve_instance(cfg, rep.subscriber_instance)
         pw = _require_password(pub_password, pub.cluster_name)
         eff_sub_pw = sub_password or pw
+
+        eff_output: Path = output if output is not None else DEFAULT_PLAN_PATH
+        DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
         click.echo(click.style("Scanning for drift...", bold=True))
         click.echo(f"  [PUBLISHER]  {pub.cluster_name} (port {pub.port})")
@@ -903,8 +909,8 @@ def replication_plan_repair(
             save_drift.write_text(report.to_json())
             click.echo(f"\nDrift report saved to: {save_drift}")
 
-        output.write_text(plan.to_json())
-        click.echo(f"\nRepair plan written to: {output}")
+        eff_output.write_text(plan.to_json())
+        click.echo(f"\nRepair plan written to: {eff_output}")
         click.echo(
             "Review the plan (especially MANUAL REVIEW steps), then run "
             "'replication apply-repair' to execute it."
@@ -925,10 +931,10 @@ def replication_plan_repair(
 @click.option(
     "--plan",
     "plan_path",
-    default="replication-plan.json",
-    show_default=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Path to the repair plan JSON produced by 'plan-repair'.",
+    default=None,
+    show_default=False,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help=f"Path to the repair plan JSON produced by 'plan-repair'. Defaults to {DEFAULT_PLAN_PATH}.",
 )
 @click.option(
     "--pub-password",
@@ -952,7 +958,7 @@ def replication_plan_repair(
 @_dry_run_option
 def replication_apply_repair(
     config: Path | None,
-    plan_path: Path,
+    plan_path: Path | None,
     pub_password: str | None,
     sub_password: str | None,
     only_step: int | None,
@@ -977,7 +983,11 @@ def replication_apply_repair(
         pw = _require_password(pub_password, pub.cluster_name)
         eff_sub_pw = sub_password or pw
 
-        plan = RepairPlan.from_json(plan_path.read_text())
+        eff_plan_path: Path = plan_path if plan_path is not None else DEFAULT_PLAN_PATH
+        if not eff_plan_path.exists():
+            click.echo(f"Error: plan file not found: {eff_plan_path}", err=True)
+            sys.exit(1)
+        plan = RepairPlan.from_json(eff_plan_path.read_text())
         steps_to_apply = plan.steps
         if only_step is not None:
             steps_to_apply = [s for s in plan.steps if s.step == only_step]
@@ -1021,3 +1031,181 @@ def replication_apply_repair(
     except (FileNotFoundError, KeyError, ValueError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# connect  (interactive config wizard)
+# ---------------------------------------------------------------------------
+
+
+def _prompt_instance(label: str, default_name: str) -> InstanceConfig:
+    """Interactively prompt for connection details for one PostgreSQL instance.
+
+    The user can paste a full connection URI
+    (``postgresql://user@host:5432/dbname``) or enter each field separately.
+    """
+    from urllib.parse import urlparse
+
+    click.echo(click.style(f"\n--- {label} instance ---", bold=True))
+    use_uri = click.confirm(
+        "Enter a full connection string (postgresql://...)?",
+        default=False,
+    )
+
+    host = "localhost"
+    port = 5432
+    admin_user = "postgres"
+    socket_dir = "/var/run/postgresql"
+
+    if use_uri:
+        raw = click.prompt("Connection string")
+        parsed = urlparse(raw)
+        if parsed.hostname:
+            host = parsed.hostname
+        if parsed.port:
+            port = parsed.port
+        if parsed.username:
+            admin_user = parsed.username
+    else:
+        host = click.prompt("Host", default="localhost")
+        port = click.prompt("Port", default=5432, type=int)
+        admin_user = click.prompt("Admin user", default="postgres")
+
+    cluster_name = click.prompt("Cluster name (identifier)", default=default_name)
+    socket_dir = click.prompt(
+        "Unix socket directory (for local connections)",
+        default=socket_dir,
+    )
+
+    return InstanceConfig(
+        cluster_name=cluster_name,
+        port=port,
+        admin_user=admin_user,
+        socket_dir=socket_dir,
+    )
+
+
+def _build_toml(
+    pg_version: int,
+    publisher: InstanceConfig,
+    subscriber: InstanceConfig,
+    db_name: str,
+    table_name: str,
+    replication: ReplicationConfig | None,
+) -> str:
+    """Render a complete config.toml as a string."""
+    lines: list[str] = [
+        "[postgres]",
+        f"version = {pg_version}",
+        "",
+        "[[instances]]",
+        f'cluster_name = "{publisher.cluster_name}"',
+        f"port = {publisher.port}",
+        f'admin_user = "{publisher.admin_user}"',
+        f'socket_dir = "{publisher.socket_dir}"',
+        "",
+        "[[instances]]",
+        f'cluster_name = "{subscriber.cluster_name}"',
+        f"port = {subscriber.port}",
+        f'admin_user = "{subscriber.admin_user}"',
+        f'socket_dir = "{subscriber.socket_dir}"',
+        "",
+        "[database]",
+        f'name = "{db_name}"',
+        "",
+        "[table]",
+        f'name = "{table_name}"',
+    ]
+    if replication is not None:
+        lines += [
+            "",
+            "[replication]",
+            f'publisher_instance = "{replication.publisher_instance}"',
+            f'subscriber_instance = "{replication.subscriber_instance}"',
+            f'publication_name = "{replication.publication_name}"',
+            f'subscription_name = "{replication.subscription_name}"',
+            f'replication_user = "{replication.replication_user}"',
+        ]
+        if replication.tables:
+            for t in replication.tables:
+                lines += [
+                    "",
+                    "[[replication.tables]]",
+                    f'schema = "{t.schema}"',
+                    f'name = "{t.name}"',
+                    f'status = "{t.status}"',
+                ]
+    return "\n".join(lines) + "\n"
+
+
+@main.command()
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    type=click.Path(dir_okay=False, writable=True, path_type=Path),
+    help=f"Where to write config.toml. Defaults to {DEFAULT_CONFIG_PATH}.",
+)
+def connect(output: Path | None) -> None:
+    """Interactively create a config file for publisher and subscriber.
+
+    Walks through a series of prompts to collect all connection details
+    needed to run the other commands.  Each instance can be specified via a
+    full PostgreSQL connection string or field-by-field.
+
+    The generated config is written to ~/.postgres-manager/config.toml
+    (or a custom path via --output).  Passwords are never stored.
+    """
+    click.echo(click.style("postgres-manager connection wizard", bold=True))
+    click.echo(
+        "Answer the prompts below to create your config file.\n"
+        "Passwords are never stored — you supply them at runtime.\n"
+    )
+
+    pg_version = click.prompt("PostgreSQL version", default=16, type=int)
+
+    publisher = _prompt_instance("Publisher", "main1")
+    subscriber = _prompt_instance("Subscriber", "main2")
+
+    click.echo(click.style("\n--- Database ---", bold=True))
+    db_name = click.prompt("Database name", default="mydb")
+    table_name = click.prompt("Demo table name", default="demo")
+
+    click.echo(click.style("\n--- Replication (optional) ---", bold=True))
+    setup_replication = click.confirm(
+        "Configure logical replication settings?",
+        default=True,
+    )
+    rep: ReplicationConfig | None = None
+    if setup_replication:
+        pub_name = click.prompt(
+            "Publication name",
+            default=f"{publisher.cluster_name}_pub",
+        )
+        sub_name = click.prompt(
+            "Subscription name",
+            default=f"{subscriber.cluster_name}_sub",
+        )
+        repl_user = click.prompt("Replication user", default="replicator")
+        rep = ReplicationConfig(
+            publisher_instance=publisher.cluster_name,
+            subscriber_instance=subscriber.cluster_name,
+            publication_name=pub_name,
+            subscription_name=sub_name,
+            replication_user=repl_user,
+        )
+
+    dest: Path = output if output is not None else DEFAULT_CONFIG_PATH
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    toml_content = _build_toml(pg_version, publisher, subscriber, db_name, table_name, rep)
+    dest.write_text(toml_content)
+
+    click.echo(click.style(f"\nConfig written to: {dest}", bold=True))
+    click.echo(
+        "Next steps:\n"
+        f"  postgres-manager install --instance {publisher.cluster_name}\n"
+        f"  postgres-manager install --instance {subscriber.cluster_name}\n"
+        f"  postgres-manager start   --instance {publisher.cluster_name} --password <pw>\n"
+        f"  postgres-manager start   --instance {subscriber.cluster_name} --password <pw>\n"
+    )

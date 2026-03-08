@@ -9,7 +9,9 @@ from pathlib import Path
 import tomli_w
 
 
-DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "config.toml"
+DEFAULT_CONFIG_DIR = Path.home() / ".postgres-manager"
+DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.toml"
+DEFAULT_PLAN_PATH = DEFAULT_CONFIG_DIR / "replication-plan.json"
 
 
 @dataclass
