@@ -1209,3 +1209,48 @@ def connect(output: Path | None) -> None:
         f"  postgres-manager start   --instance {publisher.cluster_name} --password <pw>\n"
         f"  postgres-manager start   --instance {subscriber.cluster_name} --password <pw>\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# server
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind to.")
+@click.option("--port", "-p", default=8080, show_default=True, type=int, help="Port to listen on.")
+@click.option(
+    "--reload",
+    is_flag=True,
+    default=False,
+    help="Auto-reload on code changes (development mode).",
+)
+def server(host: str, port: int, reload: bool) -> None:
+    """Start the web UI server and open a browser.
+
+    Serves a browser-based interface that exposes all postgres-manager
+    functionality: connection setup, replication monitoring, schema drift
+    detection, repair plan management, and step execution.
+
+    The server binds to localhost by default so it is only accessible from
+    the local machine.
+    """
+    import webbrowser
+
+    import uvicorn
+
+    url = f"http://{host}:{port}"
+    click.echo(click.style(f"Starting postgres-manager web UI at {url}", bold=True))
+    click.echo("Press Ctrl+C to stop.")
+
+    # Open browser after a short delay (uvicorn handles it on first request)
+    # We open before blocking so it works even without --reload
+    webbrowser.open(url)
+
+    uvicorn.run(
+        "postgres_manager.server:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="warning",
+    )
