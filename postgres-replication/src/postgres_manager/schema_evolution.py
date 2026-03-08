@@ -11,6 +11,9 @@ import psycopg
 
 from .config import InstanceConfig, ReplicationConfig
 
+# Rename detection: if this fraction of columns match by name+type, treat as a rename.
+RENAME_SIMILARITY_THRESHOLD = 0.6
+
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -22,7 +25,7 @@ class ColumnDiff:
     """A column-level difference between publisher and subscriber."""
 
     name: str
-    # "missing_on_subscriber" | "missing_on_publisher" | "type_mismatch" | "possible_rename"
+    # "missing_on_subscriber" | "missing_on_publisher" | "type_mismatch"
     issue: str
     publisher_type: str | None = None
     subscriber_type: str | None = None
@@ -40,9 +43,13 @@ class TableDrift:
     # "missing_on_subscriber"    – in publication, not yet on subscriber
     # "schema_changed"           – exists on both but columns differ
     # "no_replica_identity"      – table has no PK / REPLICA IDENTITY set
+    # "possible_rename"          – looks like a rename of `renamed_from` (assumption)
     issues: list[str]
     column_diffs: list[ColumnDiff] = field(default_factory=list)
     has_replica_identity: bool = True
+    # Populated when issues contains "possible_rename"
+    renamed_from: str | None = None        # "schema.old_table"
+    rename_confidence: float | None = None  # 0.0–1.0 column-match ratio
 
 
 @dataclass
@@ -90,6 +97,8 @@ class DriftReport:
                     for c in d.get("column_diffs", [])
                 ],
                 has_replica_identity=bool(d.get("has_replica_identity", True)),
+                renamed_from=d.get("renamed_from"),
+                rename_confidence=d.get("rename_confidence"),
             )
             for d in data["table_drifts"]
         ]
@@ -313,6 +322,21 @@ def get_slot_health(
     )
 
 
+def _column_similarity(cols_a: dict[str, str], cols_b: dict[str, str]) -> float:
+    """Return the fraction (0.0–1.0) of columns matching by both name and type.
+
+    Uses ``max(len(a), len(b))`` as denominator so extra columns on either side
+    count against the score.
+    """
+    if not cols_a and not cols_b:
+        return 1.0
+    if not cols_a or not cols_b:
+        return 0.0
+    matching = sum(1 for col, typ in cols_a.items() if cols_b.get(col) == typ)
+    total = max(len(cols_a), len(cols_b))
+    return matching / total
+
+
 def _compare_columns(
     pub_cols: dict[str, str],
     sub_cols: dict[str, str],
@@ -384,11 +408,21 @@ def detect_drift(
     - Tables in publication missing from subscriber ("missing_on_subscriber")
     - Column differences for tables that exist on both sides ("schema_changed")
     - Tables without replica identity ("no_replica_identity")
+    - Possible table renames: when a table appears missing on subscriber but the
+      subscriber has another table (not in publication) whose columns are ≥60%
+      identical, the pair is flagged as "possible_rename" rather than as two
+      separate issues.  This is an assumption — the plan JSON can be edited to
+      revert to individual drop + add treatment.
     - Slot health (lag, active, invalidation)
     """
     pub_tables_in_db = set(get_all_user_tables(publisher, pub_password, db_name))
-    pub_tables_in_pub = set(get_publication_tables(publisher, pub_password, db_name, repl.publication_name))
+    pub_tables_in_pub = set(
+        get_publication_tables(publisher, pub_password, db_name, repl.publication_name)
+    )
     sub_tables_in_db = set(get_all_user_tables(subscriber, sub_password, db_name))
+
+    # Tables on subscriber that are not in the publication — rename candidates for old name
+    sub_tables_not_in_pub = sub_tables_in_db - pub_tables_in_pub
 
     drifts: list[TableDrift] = []
 
@@ -409,36 +443,75 @@ def detect_drift(
         ))
 
     # For tables in the publication that still exist on publisher: compare with subscriber
+    # Collect "missing on subscriber" drifts — these are rename detection candidates
+    missing_on_sub: list[TableDrift] = []
+
     for schema, table in sorted(pub_tables_in_pub & pub_tables_in_db):
         issues: list[str] = []
         col_diffs: list[ColumnDiff] = []
         has_ri = True
 
-        # Missing on subscriber?
         if (schema, table) not in sub_tables_in_db:
             issues.append("missing_on_subscriber")
         else:
-            # Compare columns
             pub_cols = get_table_columns(publisher, pub_password, db_name, schema, table)
             sub_cols = get_table_columns(subscriber, sub_password, db_name, schema, table)
             col_diffs = _compare_columns(pub_cols, sub_cols, schema, table)
             if col_diffs:
                 issues.append("schema_changed")
 
-        # Replica identity check (on publisher)
         ri = get_replica_identity(publisher, pub_password, db_name, schema, table)
         if ri == "n":
             issues.append("no_replica_identity")
             has_ri = False
 
         if issues or col_diffs:
-            drifts.append(TableDrift(
+            drift = TableDrift(
                 schema=schema,
                 table=table,
                 issues=issues,
                 column_diffs=col_diffs,
                 has_replica_identity=has_ri,
-            ))
+            )
+            drifts.append(drift)
+            if "missing_on_subscriber" in issues:
+                missing_on_sub.append(drift)
+
+    # ---------------------------------------------------------------------------
+    # Rename detection
+    # ---------------------------------------------------------------------------
+    # For each "missing_on_subscriber" table (new name on publisher), check if the
+    # subscriber has an unrelated table (old name, not in publication) whose columns
+    # are sufficiently similar.  If so, replace the missing-on-subscriber drift with
+    # a "possible_rename" drift that pairs both names.
+    #
+    # This is an ASSUMPTION: the plan JSON should be reviewed and can be manually
+    # edited to revert to individual missing + subscriber-cleanup treatment.
+    # ---------------------------------------------------------------------------
+
+    renamed_sub_tables: set[tuple[str, str]] = set()  # old names already matched
+
+    for drift in missing_on_sub:
+        pub_cols = get_table_columns(publisher, pub_password, db_name, drift.schema, drift.table)
+        best_match: tuple[str, str] | None = None
+        best_score: float = 0.0
+
+        for sub_schema, sub_table in sorted(sub_tables_not_in_pub):
+            if sub_schema != drift.schema:
+                continue  # only match within same schema
+            if (sub_schema, sub_table) in renamed_sub_tables:
+                continue  # already consumed by an earlier pair
+            sub_cols = get_table_columns(subscriber, sub_password, db_name, sub_schema, sub_table)
+            score = _column_similarity(pub_cols, sub_cols)
+            if score >= RENAME_SIMILARITY_THRESHOLD and score > best_score:
+                best_score = score
+                best_match = (sub_schema, sub_table)
+
+        if best_match is not None:
+            renamed_sub_tables.add(best_match)
+            drift.issues = ["possible_rename"]
+            drift.renamed_from = f"{best_match[0]}.{best_match[1]}"
+            drift.rename_confidence = round(best_score, 3)
 
     slot_health = get_slot_health(publisher, pub_password, repl.subscription_name)
 
@@ -464,7 +537,7 @@ def plan_repair(report: DriftReport, replication_user: str) -> RepairPlan:
 
     Phase ordering:
       Phase 1 (publisher): Remove dropped tables from publication
-      Phase 2 (subscriber): CREATE/ALTER TABLE for missing/changed columns
+      Phase 2 (subscriber): CREATE/ALTER TABLE for missing/changed columns; renames
       Phase 1 (publisher): GRANT SELECT + ADD TABLE to publication for new tables
       Phase 3 (subscriber): REFRESH PUBLICATION (or full resync hint)
     """
@@ -497,6 +570,31 @@ def plan_repair(report: DriftReport, replication_user: str) -> RepairPlan:
                 f"-- Subscriber: consider dropping or archiving table {fqn} if no longer needed.",
             ],
             risk="medium",
+        ))
+
+    # Phase 2 (subscriber): handle possible renames
+    renames = [d for d in report.table_drifts if "possible_rename" in d.issues]
+    for drift in renames:
+        new_fqn = f"{drift.schema}.{drift.table}"
+        old_fqn = drift.renamed_from or "unknown.unknown"
+        pct = int((drift.rename_confidence or 0) * 100)
+        steps.append(RepairStep(
+            step=next_step(),
+            phase=2,
+            target="subscriber",
+            description=(
+                f"[SUBSCRIBER] Assumed rename: '{old_fqn}' → '{new_fqn}' "
+                f"({pct}% column match)"
+            ),
+            sql=[
+                f"-- ASSUMPTION: This rename was inferred from {pct}% column similarity.",
+                f"-- To treat as a separate drop + add instead, remove this step and add:",
+                f"--   a) A subscriber cleanup step for '{old_fqn}'",
+                f"--   b) A subscriber CREATE TABLE step for '{new_fqn}'",
+                f"ALTER TABLE {old_fqn} RENAME TO {drift.table};",
+            ],
+            risk="medium",
+            manual_review=True,
         ))
 
     # Phase 2 (subscriber): create missing tables and fix schema
@@ -586,7 +684,7 @@ def plan_repair(report: DriftReport, replication_user: str) -> RepairPlan:
         ))
 
     # Phase 3 (subscriber): refresh publication or full resync hint
-    has_new_tables = bool(new_unconfigured or missing)
+    has_changes = bool(new_unconfigured or missing or renames or schema_changed)
     if needs_full_resync:
         steps.append(RepairStep(
             step=next_step(),
@@ -604,7 +702,7 @@ def plan_repair(report: DriftReport, replication_user: str) -> RepairPlan:
             requires_resync=True,
             manual_review=True,
         ))
-    elif has_new_tables or schema_changed:
+    elif has_changes:
         steps.append(RepairStep(
             step=next_step(),
             phase=3,
@@ -632,6 +730,29 @@ def plan_repair(report: DriftReport, replication_user: str) -> RepairPlan:
 
 
 # ---------------------------------------------------------------------------
+# detect_and_plan  (merged entry point used by the CLI)
+# ---------------------------------------------------------------------------
+
+
+def detect_and_plan(
+    publisher: InstanceConfig,
+    pub_password: str,
+    subscriber: InstanceConfig,
+    sub_password: str,
+    repl: ReplicationConfig,
+    db_name: str,
+) -> tuple[DriftReport, RepairPlan]:
+    """Detect drift and generate a repair plan in one call.
+
+    Returns the DriftReport (for display / optional persistence) and the
+    RepairPlan (written to disk by the caller).
+    """
+    report = detect_drift(publisher, pub_password, subscriber, sub_password, repl, db_name)
+    plan = plan_repair(report, repl.replication_user)
+    return report, plan
+
+
+# ---------------------------------------------------------------------------
 # apply_repair
 # ---------------------------------------------------------------------------
 
@@ -645,17 +766,7 @@ def apply_repair_step(
     db_name: str,
     dry_run: bool = False,
 ) -> None:
-    """Execute or preview a single RepairStep.
-
-    Args:
-        step: The step to apply.
-        publisher: Publisher instance config.
-        pub_password: Publisher admin password.
-        subscriber: Subscriber instance config.
-        sub_password: Subscriber admin password.
-        db_name: Database name.
-        dry_run: If True, print SQL without executing.
-    """
+    """Execute or preview a single RepairStep."""
     target_label = step.target.upper()
     print(f"\n[Step {step.step}] Phase {step.phase} | Target: [{target_label}]")
     print(f"  {step.description}")

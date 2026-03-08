@@ -282,14 +282,11 @@ uv run postgres-manager query --instance main2 --password "$PGPASSWORD_SUB"
 # 7. Monitor replication lag
 uv run postgres-manager replication monitor --password "$PGPASSWORD_PUB"
 
-# 8. Detect schema drift (after evolving tables)
-uv run postgres-manager replication detect-drift \
+# 8. Detect drift and generate repair plan in one step
+uv run postgres-manager replication plan-repair \
   --pub-password "$PGPASSWORD_PUB" --sub-password "$PGPASSWORD_SUB"
 
-# 9. Generate repair plan from drift report
-uv run postgres-manager replication plan-repair
-
-# 10. Review and apply the repair plan
+# 9. Review and apply the repair plan
 uv run postgres-manager replication apply-repair \
   --pub-password "$PGPASSWORD_PUB" --sub-password "$PGPASSWORD_SUB"
 ```
@@ -298,19 +295,19 @@ uv run postgres-manager replication apply-repair \
 
 ## Schema evolution
 
-Once replication is running, your schema will change over time. The three
-`schema-evolution` commands help you keep publisher and subscriber in sync.
+Once replication is running, your schema will change over time. Two commands
+help you keep publisher and subscriber in sync.
 
 ### Workflow
 
 ```
-detect-drift  →  plan-repair  →  apply-repair
+plan-repair  →  apply-repair
 ```
 
-1. **`detect-drift`** — read-only scan. Writes `replication-drift.json`.
-2. **`plan-repair`** — turns the drift report into an editable
-   `replication-plan.json` with ordered, phase-annotated steps.
-3. **`apply-repair`** — executes the plan. Supports `--dry-run` and `--step N`.
+1. **`plan-repair`** — detects drift, infers possible renames, and generates
+   an editable `replication-plan.json` with ordered, phase-annotated steps.
+   No changes are made to any database.
+2. **`apply-repair`** — executes the plan. Supports `--dry-run` and `--step N`.
 
 Each step is clearly labelled `[PUBLISHER]` or `[SUBSCRIBER]` so you always
 know which instance is being modified.
@@ -324,80 +321,81 @@ know which instance is being modified.
 | `missing_on_subscriber` | Table is in the publication but does not exist on the subscriber |
 | `schema_changed` | Table exists on both sides but columns differ |
 | `no_replica_identity` | Table has no primary key or REPLICA IDENTITY (breaks replication) |
+| `possible_rename` | Subscriber has a table (old name) whose columns are ≥60% similar to a missing table (new name) — treated as an assumed rename |
+
+### Rename detection
+
+When `plan-repair` sees a table that is in the publication but missing on the
+subscriber (`missing_on_subscriber`), it checks whether the subscriber has any
+table (not in the publication) whose columns are at least 60% identical by name
+and type.  If so, the pair is flagged as a **`possible_rename`**.
+
+This is an **assumption** — PostgreSQL's OID-based publication tracking means
+a table renamed on the publisher is immediately reflected in `pg_publication_tables`,
+but the subscriber still has the old name.
+
+The generated plan step:
+- Is marked `*** MANUAL REVIEW ***`
+- Contains `ALTER TABLE old_name RENAME TO new_name;` on **[SUBSCRIBER]**
+- Includes a comment explaining how to revert to individual drop+add treatment
+  by editing the plan JSON before applying
 
 ### Repair phases
 
-Steps are grouped into phases and always executed in this order:
+Steps are generated in this order:
 
 | Phase | Target | Action |
 |-------|--------|--------|
 | 1 | **[PUBLISHER]** | Remove dropped tables from publication |
-| 2 | **[SUBSCRIBER]** | CREATE missing tables; ALTER for column changes |
+| 2 | **[SUBSCRIBER]** | Renames (assumed); CREATE missing tables; ALTER for column changes |
 | 1 | **[PUBLISHER]** | GRANT SELECT + ADD new tables to publication |
 | 3 | **[SUBSCRIBER]** | REFRESH PUBLICATION (or DROP+CREATE if slot invalidated) |
 
-### `replication detect-drift`
+### `replication plan-repair`
 
-Compares the live state of publisher and subscriber. No changes are made.
+Detects drift and generates a phase-ordered `replication-plan.json` in one step.
+The plan JSON is editable — review it (especially `MANUAL REVIEW` steps) before applying.
 
 ```bash
-uv run postgres-manager replication detect-drift \
+uv run postgres-manager replication plan-repair \
   --pub-password "$PGPASSWORD_PUB" \
   --sub-password "$PGPASSWORD_SUB" \
-  --output replication-drift.json     # default
+  --output replication-plan.json     # default
+
+# Also save the raw drift report for debugging
+uv run postgres-manager replication plan-repair \
+  --pub-password "$PGPASSWORD_PUB" \
+  --sub-password "$PGPASSWORD_SUB" \
+  --save-drift replication-drift.json
 ```
 
-Output:
+Output (rename scenario):
 ```
-Detecting drift...
+Scanning for drift...
   [PUBLISHER]  main1 (port 5432)
   [SUBSCRIBER] main2 (port 5433)
   Publication: main1_pub
   Subscription: main2_sub
   Database: mydb
 
-Found 2 table(s) with drift:
+Found 1 table(s) with drift:
 
-  public.orders
-    - not in publication (new table?)
+  public.new_orders
+    - possible table rename (ASSUMPTION — review plan)
+    assumed renamed from: public.old_orders (100% column match)
 
-  public.users
-    - column differences detected
-    column 'email': missing_on_subscriber
-      publisher type: text
-      suggestion: ALTER TABLE public.users ADD COLUMN email text;
+Repair Plan
+  Steps: 2
 
-Drift report written to: replication-drift.json
-```
+  Step 1: Phase 2 | [SUBSCRIBER] [MEDIUM] *** MANUAL REVIEW ***
+    [SUBSCRIBER] Assumed rename: 'public.old_orders' → 'public.new_orders' (100% column match)
+      -- ASSUMPTION: This rename was inferred from 100% column similarity.
+      -- To treat as a separate drop + add instead, remove this step and add:
+      --   a) A subscriber cleanup step for 'public.old_orders'
+      --   b) A subscriber CREATE TABLE step for 'public.new_orders'
+      ALTER TABLE public.old_orders RENAME TO new_orders;
 
-### `replication plan-repair`
-
-Reads `replication-drift.json` and produces a phase-ordered `replication-plan.json`.
-The plan JSON is editable — review it before applying.
-
-```bash
-uv run postgres-manager replication plan-repair \
-  --drift-report replication-drift.json \    # default
-  --output replication-plan.json             # default
-```
-
-Output:
-```
-Repair Plan Summary
-  Publisher:   [main1]
-  Subscriber:  [main2]
-  Steps:       3
-
-  Step 1: Phase 1 | [PUBLISHER] [LOW]
-    [PUBLISHER] Add new table 'public.orders' to publication 'main1_pub'
-      GRANT SELECT ON public.orders TO replicator;
-      ALTER PUBLICATION main1_pub ADD TABLE public.orders;
-
-  Step 2: Phase 2 | [SUBSCRIBER] [MEDIUM]
-    [SUBSCRIBER] Apply schema changes to 'public.users' on subscriber
-      ALTER TABLE public.users ADD COLUMN email text;
-
-  Step 3: Phase 3 | [SUBSCRIBER] [LOW]
+  Step 2: Phase 3 | [SUBSCRIBER] [LOW]
     [SUBSCRIBER] Refresh subscription 'main2_sub' to pick up publication changes
       ALTER SUBSCRIPTION main2_sub REFRESH PUBLICATION;
 
@@ -434,14 +432,26 @@ uv run postgres-manager replication apply-repair \
 # 1. Create the new table on the publisher
 uv run postgres-manager create-table --instance main1 ...
 
-# 2. Detect the drift (new table appears as 'new_unconfigured')
-uv run postgres-manager replication detect-drift \
+# 2. Detect drift and generate repair plan (new table shows as 'new_unconfigured')
+uv run postgres-manager replication plan-repair \
   --pub-password "$PW1" --sub-password "$PW2"
 
-# 3. Generate the repair plan
-uv run postgres-manager replication plan-repair
+# 3. Review the plan, then apply it
+uv run postgres-manager replication apply-repair \
+  --pub-password "$PW1" --sub-password "$PW2"
+```
 
-# 4. Review the plan, then apply it
+### Example: table renamed on publisher
+
+```bash
+# After: ALTER TABLE orders RENAME TO customer_orders; (on publisher)
+
+# plan-repair detects: new_orders in pub, orders still on subscriber → possible_rename
+uv run postgres-manager replication plan-repair \
+  --pub-password "$PW1" --sub-password "$PW2"
+
+# Review the plan — rename step is marked MANUAL REVIEW
+# If the rename is correct, apply; if not, edit the plan JSON first
 uv run postgres-manager replication apply-repair \
   --pub-password "$PW1" --sub-password "$PW2"
 ```
@@ -451,9 +461,8 @@ uv run postgres-manager replication apply-repair \
 ```bash
 # After: ALTER TABLE orders ADD COLUMN discount NUMERIC DEFAULT 0;
 
-uv run postgres-manager replication detect-drift --pub-password "$PW1" --sub-password "$PW2"
-uv run postgres-manager replication plan-repair
-# Review plan — the step is marked [MEDIUM] risk for schema change
+uv run postgres-manager replication plan-repair --pub-password "$PW1" --sub-password "$PW2"
+# Review plan — step marked [MEDIUM] risk with ALTER TABLE suggestion
 uv run postgres-manager replication apply-repair --pub-password "$PW1" --sub-password "$PW2"
 ```
 
@@ -528,7 +537,7 @@ uv run pytest tests/test_cli.py -v
 | `tests/test_postgres.py` | `create_database`, `create_table`, `insert_row`, `query_rows` against real PG |
 | `tests/test_cli.py` | All Click commands via `CliRunner` against real PG |
 | `tests/test_replication.py` | Full logical replication workflow via CLI against real PG |
-| `tests/test_schema_evolution.py` | `detect-drift`, `plan-repair`, `apply-repair` against real PG |
+| `tests/test_schema_evolution.py` | `plan-repair` (detect+plan), `apply-repair`, rename detection against real PG |
 
 Key integration assertions:
 - Each command is called **twice** (once per instance).

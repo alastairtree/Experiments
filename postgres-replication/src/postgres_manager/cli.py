@@ -16,11 +16,9 @@ from .config import (
     save_replication_config,
 )
 from .schema_evolution import (
-    DriftReport,
     RepairPlan,
     apply_repair_step,
-    detect_drift,
-    plan_repair,
+    detect_and_plan,
 )
 from .postgres import (
     PostgresError,
@@ -740,11 +738,11 @@ def replication_monitor(
 
 
 # ---------------------------------------------------------------------------
-# replication detect-drift
+# replication plan-repair  (merged: detect drift + generate plan in one step)
 # ---------------------------------------------------------------------------
 
 
-@replication.command("detect-drift")
+@replication.command("plan-repair")
 @_config_option
 @click.option(
     "--pub-password",
@@ -761,21 +759,35 @@ def replication_monitor(
 @click.option(
     "--output",
     "-o",
-    default="replication-drift.json",
+    default="replication-plan.json",
     show_default=True,
     type=click.Path(dir_okay=False, writable=True, path_type=Path),
-    help="Path to write the drift report JSON.",
+    help="Path to write the repair plan JSON.",
 )
-def replication_detect_drift(
+@click.option(
+    "--save-drift",
+    default=None,
+    type=click.Path(dir_okay=False, writable=True, path_type=Path),
+    help="Optionally save the raw drift report JSON for debugging.",
+)
+def replication_plan_repair(
     config: Path | None,
     pub_password: str | None,
     sub_password: str | None,
     output: Path,
+    save_drift: Path | None,
 ) -> None:
-    """Detect schema and configuration drift between publisher and subscriber.
+    """Detect schema drift and generate an ordered repair plan in one step.
 
-    Compares the live state of both instances and writes a JSON drift report.
-    No changes are made to any database.
+    Connects to both instances, compares their live state, detects drift
+    (including possible table renames), then writes a replication-plan.json
+    with phase-annotated steps labelled [PUBLISHER] or [SUBSCRIBER].
+
+    The plan JSON can be edited before applying — in particular, any
+    "possible_rename" steps are clearly marked as assumptions and include
+    instructions for reverting to individual drop + add treatment.
+
+    No changes are made to any database by this command.
     """
     try:
         config_path = config or DEFAULT_CONFIG_PATH
@@ -793,124 +805,77 @@ def replication_detect_drift(
         pw = _require_password(pub_password, pub.cluster_name)
         eff_sub_pw = sub_password or pw
 
-        click.echo(click.style("Detecting drift...", bold=True))
+        click.echo(click.style("Scanning for drift...", bold=True))
         click.echo(f"  [PUBLISHER]  {pub.cluster_name} (port {pub.port})")
         click.echo(f"  [SUBSCRIBER] {sub.cluster_name} (port {sub.port})")
         click.echo(f"  Publication: {rep.publication_name}")
         click.echo(f"  Subscription: {rep.subscription_name}")
         click.echo(f"  Database: {cfg.database.name}")
 
-        report = detect_drift(pub, pw, sub, eff_sub_pw, rep, cfg.database.name)
+        report, plan = detect_and_plan(pub, pw, sub, eff_sub_pw, rep, cfg.database.name)
 
+        # ---- Drift summary ----
         click.echo("")
-        if not report.table_drifts and report.slot_health and report.slot_health.active:
-            click.echo(
-                click.style("No drift detected — publisher and subscriber are in sync.", fg="green")
+        if report.slot_health:
+            slot = report.slot_health
+            status = "active" if slot.active else "INACTIVE"
+            inv = (
+                f" (invalidated: {slot.invalidation_reason})"
+                if slot.invalidation_reason
+                else ""
             )
-        else:
-            if report.slot_health:
-                slot = report.slot_health
-                status = "active" if slot.active else "INACTIVE"
-                inv = (
-                    f" (invalidated: {slot.invalidation_reason})"
-                    if slot.invalidation_reason
-                    else ""
-                )
-                click.echo(f"Slot '{slot.slot_name}': {status}, lag={slot.lag_bytes} bytes{inv}")
-                if slot.invalidation_reason:
-                    click.echo(
-                        click.style(
-                            "  WARNING: slot invalidated — full resync may be required.",
-                            fg="red",
-                        )
-                    )
-
-            if report.table_drifts:
+            click.echo(f"Slot '{slot.slot_name}': {status}, lag={slot.lag_bytes} bytes{inv}")
+            if slot.invalidation_reason:
                 click.echo(
                     click.style(
-                        f"\nFound {len(report.table_drifts)} table(s) with drift:", bold=True
+                        "  WARNING: slot invalidated — full resync required.", fg="red"
                     )
                 )
-                for drift in report.table_drifts:
-                    fqn = f"{drift.schema}.{drift.table}"
-                    click.echo(f"\n  {fqn}")
-                    issue_labels = {
-                        "new_unconfigured": "not in publication (new table?)",
-                        "dropped_from_publisher": "in publication but DROPPED from publisher",
-                        "missing_on_subscriber": "in publication but missing on subscriber",
-                        "schema_changed": "column differences detected",
-                        "no_replica_identity": "no REPLICA IDENTITY / primary key",
-                    }
-                    for issue in drift.issues:
-                        click.echo(f"    - {issue_labels.get(issue, issue)}")
-                    for cd in drift.column_diffs:
-                        click.echo(f"    column '{cd.name}': {cd.issue}")
-                        if cd.publisher_type:
-                            click.echo(f"      publisher type: {cd.publisher_type}")
-                        if cd.subscriber_type:
-                            click.echo(f"      subscriber type: {cd.subscriber_type}")
-                        if cd.suggestion:
-                            click.echo(f"      suggestion: {cd.suggestion}")
-            else:
-                click.echo("No table drift detected.")
 
-        output.write_text(report.to_json())
-        click.echo(f"\nDrift report written to: {output}")
-        click.echo("Run 'replication plan-repair' to generate a repair plan.")
+        issue_labels = {
+            "new_unconfigured": "not in publication (new table?)",
+            "dropped_from_publisher": "in publication but DROPPED from publisher",
+            "missing_on_subscriber": "in publication but missing on subscriber",
+            "schema_changed": "column differences detected",
+            "no_replica_identity": "no REPLICA IDENTITY / primary key",
+            "possible_rename": "possible table rename (ASSUMPTION — review plan)",
+        }
 
-    except (FileNotFoundError, KeyError, ValueError) as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
+        if report.table_drifts:
+            click.echo(
+                click.style(
+                    f"\nFound {len(report.table_drifts)} table(s) with drift:", bold=True
+                )
+            )
+            for drift in report.table_drifts:
+                fqn = f"{drift.schema}.{drift.table}"
+                click.echo(f"\n  {fqn}")
+                for issue in drift.issues:
+                    click.echo(f"    - {issue_labels.get(issue, issue)}")
+                if drift.renamed_from is not None:
+                    pct = int((drift.rename_confidence or 0) * 100)
+                    click.echo(
+                        click.style(
+                            f"    assumed renamed from: {drift.renamed_from} "
+                            f"({pct}% column match)",
+                            fg="yellow",
+                        )
+                    )
+                for cd in drift.column_diffs:
+                    click.echo(f"    column '{cd.name}': {cd.issue}")
+                    if cd.publisher_type:
+                        click.echo(f"      publisher type: {cd.publisher_type}")
+                    if cd.subscriber_type:
+                        click.echo(f"      subscriber type: {cd.subscriber_type}")
+                    if cd.suggestion:
+                        click.echo(f"      suggestion: {cd.suggestion}")
+        else:
+            click.echo("No drift detected — publisher and subscriber are in sync.")
 
-
-# ---------------------------------------------------------------------------
-# replication plan-repair
-# ---------------------------------------------------------------------------
-
-
-@replication.command("plan-repair")
-@_config_option
-@click.option(
-    "--drift-report",
-    "drift_report_path",
-    default="replication-drift.json",
-    show_default=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Path to the drift report JSON produced by 'detect-drift'.",
-)
-@click.option(
-    "--output",
-    "-o",
-    default="replication-plan.json",
-    show_default=True,
-    type=click.Path(dir_okay=False, writable=True, path_type=Path),
-    help="Path to write the repair plan JSON.",
-)
-def replication_plan_repair(
-    config: Path | None,
-    drift_report_path: Path,
-    output: Path,
-) -> None:
-    """Generate an ordered repair plan from a drift report.
-
-    Reads the JSON drift report and produces a replication-plan.json with
-    ordered, phase-annotated steps labelled [PUBLISHER] or [SUBSCRIBER].
-    The plan file can be edited before applying.
-    """
-    try:
-        cfg = load_config(config or DEFAULT_CONFIG_PATH)
-        rep = cfg.replication
-        if rep is None:
-            click.echo("Error: no [replication] section in config.", err=True)
-            sys.exit(1)
-
-        report = DriftReport.from_json(drift_report_path.read_text())
-        plan = plan_repair(report, rep.replication_user)
-
-        click.echo(click.style("Repair Plan Summary", bold=True))
-        click.echo(f"  Publisher:   [{plan.publisher_instance}]")
-        click.echo(f"  Subscriber:  [{plan.subscriber_instance}]")
-        click.echo(f"  Steps:       {len(plan.steps)}")
+        # ---- Plan summary ----
+        click.echo("")
+        click.echo(click.style("Repair Plan", bold=True))
+        click.echo(f"  Steps: {len(plan.steps)}")
         if plan.needs_full_resync:
             click.echo(
                 click.style("  WARNING: full resync required (slot invalidated)", fg="red")
@@ -934,9 +899,16 @@ def replication_plan_repair(
         else:
             click.echo("  No repair steps needed.")
 
+        if save_drift is not None:
+            save_drift.write_text(report.to_json())
+            click.echo(f"\nDrift report saved to: {save_drift}")
+
         output.write_text(plan.to_json())
         click.echo(f"\nRepair plan written to: {output}")
-        click.echo("Review the plan, then run 'replication apply-repair' to execute it.")
+        click.echo(
+            "Review the plan (especially MANUAL REVIEW steps), then run "
+            "'replication apply-repair' to execute it."
+        )
 
     except (FileNotFoundError, KeyError, ValueError) as exc:
         click.echo(f"Error: {exc}", err=True)
