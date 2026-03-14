@@ -1,0 +1,5 @@
+# Playwright browser configuration
+# Set headless = false to open a visible browser window (desktop mode)
+[browser]
+headless = true
+browser_type = "chromium"
