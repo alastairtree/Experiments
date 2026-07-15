@@ -1,0 +1,153 @@
+name: not-so-fat-lab image
+
+# Builds the slim batch-only MATLAB base image.
+#   * Monthly schedule -> rebuild so the image picks up fresh OS security
+#     updates, the latest uv, and the latest NASA MICE / CDF releases, then
+#     publish to GHCR.
+#   * Manual dispatch  -> same, with overridable release / product list.
+#   * Push / PR touching the image files -> fast Dockerfile lint only (the full
+#     MATLAB build pulls many GB and takes tens of minutes, so it is not run on
+#     every commit).
+#
+# Building the image needs NO MATLAB licence (mpm only downloads/installs).
+# A licence is only needed to *run* MATLAB; supply one via the MLM_LICENSE_FILE
+# repository secret to enable the optional batch smoke test.
+
+on:
+  schedule:
+    - cron: '0 3 1 * *'   # 03:00 UTC on the 1st of every month
+  workflow_dispatch:
+    inputs:
+      matlab_release:
+        description: 'MATLAB release (mpm --release)'
+        default: 'R2026a'
+        type: string
+      additional_products:
+        description: 'Space-separated mpm products added on top of MATLAB'
+        default: 'Statistics_and_Machine_Learning_Toolbox Signal_Processing_Toolbox Curve_Fitting_Toolbox Optimization_Toolbox MATLAB_Report_Generator Control_System_Toolbox Mapping_Toolbox Communications_Toolbox'
+        type: string
+      push:
+        description: 'Push the built image to GHCR'
+        default: true
+        type: boolean
+  push:
+    paths:
+      - 'not-so-fat-lab/**'
+      - '.github/workflows/not-so-fat-lab.yml'
+  pull_request:
+    paths:
+      - 'not-so-fat-lab/**'
+      - '.github/workflows/not-so-fat-lab.yml'
+
+concurrency:
+  group: not-so-fat-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  MATLAB_RELEASE: ${{ inputs.matlab_release || 'R2026a' }}
+  ADDITIONAL_PRODUCTS: ${{ inputs.additional_products || 'Statistics_and_Machine_Learning_Toolbox Signal_Processing_Toolbox Curve_Fitting_Toolbox Optimization_Toolbox MATLAB_Report_Generator Control_System_Toolbox Mapping_Toolbox Communications_Toolbox' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast feedback on ordinary commits: lint the Dockerfile, don't build MATLAB.
+  # ---------------------------------------------------------------------------
+  lint:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Dockerfile (hadolint)
+        run: |
+          # Intentional patterns for this image:
+          #   DL3033/DL3041 no version pins (monthly rebuild wants latest OS packages)
+          #   DL3003 `cd` inside a single throwaway builder RUN
+          #   SC2015 `A && B || C` is the deliberate MathWorks mpm failure idiom
+          #   SC2046 unquoted $(cat base-dependencies.txt) MUST word-split
+          docker run --rm -i hadolint/hadolint hadolint \
+            --ignore DL3033 --ignore DL3041 --ignore DL3003 --ignore SC2015 --ignore SC2046 \
+            - < not-so-fat-lab/Dockerfile
+
+  # ---------------------------------------------------------------------------
+  # Monthly / on-demand full build, smoke test, and publish.
+  # ---------------------------------------------------------------------------
+  build:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      MLM_LICENSE_FILE: ${{ secrets.MLM_LICENSE_FILE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/boost /usr/local/.ghcup /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          sudo docker image prune --all --force || true
+          echo "After:"; df -h /
+
+      - name: Compute image name and tags
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image="${REGISTRY}/${owner}/not-so-fat-lab"
+          rel_lc="$(echo "${MATLAB_RELEASE}" | tr '[:upper:]' '[:lower:]')"
+          date_tag="$(date -u +%Y%m%d)"
+          {
+            echo "image=${image}"
+            echo "tags=${image}:latest,${image}:${rel_lc},${image}:${rel_lc}-${date_tag}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image (load locally for smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./not-so-fat-lab
+          load: true
+          tags: nsfl-local:build
+          build-args: |
+            MATLAB_RELEASE=${{ env.MATLAB_RELEASE }}
+            ADDITIONAL_PRODUCTS=${{ env.ADDITIONAL_PRODUCTS }}
+
+      - name: Report image size
+        run: docker images nsfl-local:build --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+
+      - name: Smoke test (no licence required)
+        run: |
+          docker run --rm --entrypoint /bin/bash nsfl-local:build -lc '
+            set -euo pipefail
+            echo "== uv =="            ; uv --version
+            echo "== matlab on PATH ==" ; command -v matlab
+            echo "== MICE =="          ; ls /opt/naif/mice/lib /opt/naif/mice/src/mice
+            echo "== CDF =="           ; ls /opt/cdf/matlab_cdf_patch
+          '
+
+      - name: Batch licence smoke test (optional)
+        if: ${{ env.MLM_LICENSE_FILE != '' }}
+        run: |
+          docker run --rm -e MLM_LICENSE_FILE nsfl-local:build \
+            -batch "disp(version); assert(~isempty(which('cspice_furnsh')),'MICE not on path'); assert(~isempty(which('spdfcdfread')),'CDF patch not on path'); disp('MICE + CDF reachable');"
+
+      - name: Push to GHCR
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push) }}
+        run: |
+          IFS=',' read -ra TAGS <<< "${{ steps.meta.outputs.tags }}"
+          for t in "${TAGS[@]}"; do
+            docker tag nsfl-local:build "$t"
+            docker push "$t"
+          done

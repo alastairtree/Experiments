@@ -196,7 +196,18 @@ licence boundary, and behaviourally against the stock image:
 
 ## Continuous integration
 
-`.github/workflows/not-so-fat-lab.yml`:
+The workflow ships at [`ci/not-so-fat-lab.yml`](ci/not-so-fat-lab.yml). GitHub
+only runs workflows from `.github/workflows/`, so copy it there once to activate
+it (see [`ci/README.md`](ci/README.md) — it lives here rather than pre-installed
+because the generating session's git token lacked the `workflow` OAuth scope):
+
+```bash
+mkdir -p .github/workflows
+cp not-so-fat-lab/ci/not-so-fat-lab.yml .github/workflows/
+git add .github/workflows/not-so-fat-lab.yml && git commit -m "Activate CI" && git push
+```
+
+What it does:
 
 * **Monthly** (`cron: 0 3 1 * *`) and **on demand** (`workflow_dispatch`): free
   up runner disk, build the full image, smoke-test it, and push to GHCR
