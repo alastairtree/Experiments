@@ -73,15 +73,29 @@ RUN curl -fsSL -o mpm https://www.mathworks.com/mpm/glnxa64/mpm \
     || { echo "==== mpm install failed; /tmp/mathworks_root.log follows ===="; \
          cat /tmp/mathworks_root.log 2>/dev/null; exit 1; }
 
+# Batch renders no UI and opens no browsable documentation, so drop the
+# in-product HTML help tree (~60 MB). Command-line `help <fn>` still works --
+# it reads the help text from each function's .m file, not from here.
+RUN rm -rf /opt/matlab/${MATLAB_RELEASE}/help
+
 # --- NASA NAIF SPICE toolkit for MATLAB (MICE) -----------------------------
 # Precompiled glnxa64 mex files -- no compiler needed.
 # https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/MATLAB/req/mice.html
+#
+# The tarball ships ~137 MB, but MATLAB only ever loads two things, both on
+# MATLABPATH: the prebuilt mex gateway (mice/lib/mice.mexa64) and the cspice_*
+# .m wrappers (mice/src/mice). Everything else -- NAIF docs, the cookbook C
+# programs and their compiled binaries, example kernels, C headers, and the
+# static .a archives used only to *rebuild* the mex -- is dropped (~115 MB).
 RUN mkdir -p /opt/naif && cd /opt/naif \
     && curl -fsSL -o mice.tar.Z \
         https://naif.jpl.nasa.gov/pub/naif/toolkit/MATLAB/PC_Linux_GCC_MATLAB9.x_64bit/packages/mice.tar.Z \
     && gzip -d mice.tar.Z \
     && tar xf mice.tar \
-    && rm -f mice.tar
+    && rm -f mice.tar \
+    && find /opt/naif/mice -mindepth 1 -maxdepth 1 ! -name lib ! -name src -exec rm -rf {} + \
+    && find /opt/naif/mice/src -mindepth 1 -maxdepth 1 ! -name mice -exec rm -rf {} + \
+    && rm -f /opt/naif/mice/lib/cspice.a /opt/naif/mice/lib/csupport.a
 
 # --- NASA CDF (Common Data Format) MATLAB patch ----------------------------
 # Precompiled glnxa64 -- no compiler needed. https://cdf.gsfc.nasa.gov/

@@ -143,11 +143,18 @@ jobs:
           docker run --rm -e MLM_LICENSE_FILE nsfl-local:build \
             -batch "disp(version); assert(~isempty(which('cspice_furnsh')),'MICE not on path'); assert(~isempty(which('spdfcdfread')),'CDF patch not on path'); disp('MICE + CDF reachable');"
 
-      - name: Push to GHCR
+      # Push with zstd-compressed layers (smaller `docker pull` than the default
+      # gzip). force-compression re-compresses inherited base layers too. The
+      # buildx builder still has every layer cached from the local build above,
+      # so this only re-exports + uploads -- it does not rebuild MATLAB.
+      - name: Push to GHCR (zstd-compressed)
         if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push) }}
-        run: |
-          IFS=',' read -ra TAGS <<< "${{ steps.meta.outputs.tags }}"
-          for t in "${TAGS[@]}"; do
-            docker tag nsfl-local:build "$t"
-            docker push "$t"
-          done
+        uses: docker/build-push-action@v6
+        with:
+          context: ./not-so-fat-lab
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            MATLAB_RELEASE=${{ env.MATLAB_RELEASE }}
+            ADDITIONAL_PRODUCTS=${{ env.ADDITIONAL_PRODUCTS }}
+          provenance: false
+          outputs: type=image,push=true,compression=zstd,compression-level=19,force-compression=true
