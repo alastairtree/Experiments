@@ -78,6 +78,14 @@ RUN curl -fsSL -o mpm https://www.mathworks.com/mpm/glnxa64/mpm \
 # it reads the help text from each function's .m file, not from here.
 RUN rm -rf /opt/matlab/${MATLAB_RELEASE}/help
 
+# Batch never opens the Chromium-based UI (desktop / Live Editor / uifigures).
+# The engine does hard-load libcef.so at start-up, so that stays -- but the
+# browser's *resource* payload does not: drop the localized .pak string bundles
+# (cef_locales) and the resource cache (cef_rcf), ~47 MB. Verified that
+# matlab -batch still starts and MICE/CDF still load without them.
+RUN rm -rf /opt/matlab/${MATLAB_RELEASE}/bin/glnxa64/cef_locales \
+           /opt/matlab/${MATLAB_RELEASE}/bin/glnxa64/cef_rcf
+
 # --- NASA NAIF SPICE toolkit for MATLAB (MICE) -----------------------------
 # Precompiled glnxa64 mex files -- no compiler needed.
 # https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/MATLAB/req/mice.html
