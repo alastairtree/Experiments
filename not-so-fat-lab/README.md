@@ -177,20 +177,25 @@ isolate that saving apples-to-apples and keep the measurement build fast.
 
 ### How this was validated
 
-Building needs no licence, and running MATLAB code does — so batch execution
-can't be exercised end-to-end here. Instead the image was validated up to the
-licence boundary, and behaviourally against the stock image:
+Validated **end-to-end against a real network licence server** (FlexLM,
+`port@host` via `MLM_LICENSE_FILE`), running the shipped image with its default
+entrypoint as the non-root `matlab` user — i.e. exactly how a downstream job
+runs it:
 
 * `mpm` installs MATLAB R2026a; the launcher works (`matlab -help`, `matlab -n`).
-* `ldd` on the main MATLAB binary reports **no missing libraries**; MATLAB
-  starts far enough to initialise its preferences directory.
-* `matlab -batch` then stops at **licence checkout** — the *same* outcome class
-  as `mathworks/matlab:r2026a`, which (being wired for MathWorks online
-  licensing) instead prompts for an account e-mail. Neither fails on libraries;
-  both simply need a licence. This confirms the pruned, batch-only dependency
-  set is sufficient for MATLAB start-up.
-* `uv`, MICE (`mice.mexa64` + `cspice_*`) and the CDF patch (`spdfcdfread`) are
-  all present and on `MATLABPATH` in the final image.
+* `docker run -e MLM_LICENSE_FILE=… <image> -batch "…"` **checks out a licence
+  and executes**: `version` → `R2026a Update 3`, arithmetic returns, exit code 0.
+* **MICE** loads and computes inside that licensed session:
+  `cspice_tkvrsn('TOOLKIT')` → `CSPICE_N0067`, `mice.mexa64` resolves on
+  `MATLABPATH`, and `cspice_convrt(1,'AU','KM')` returns 149 597 870.614.
+* The **NASA CDF** patch (`spdfcdfinfo` / `spdfcdfread`) resolves on `MATLABPATH`,
+  and `uv` is on `PATH`.
+
+> **Note — `mesa-libgbm` is required.** The R2026a engine `dlopen`s
+> `libgbm.so.1` during start-up (it is *not* a linked dependency, so `ldd`
+> does not reveal it). If it is missing, `matlab -batch` dies **silently with
+> exit 127 before printing anything**. It is therefore pinned in
+> `base-dependencies.txt`; do not drop it when pruning further.
 
 ---
 
