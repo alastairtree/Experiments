@@ -1,0 +1,4 @@
+# Keep the build context tiny -- only the files the Dockerfile actually COPYs.
+*
+!Dockerfile
+!base-dependencies.txt
