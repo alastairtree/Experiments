@@ -73,18 +73,53 @@ RUN curl -fsSL -o mpm https://www.mathworks.com/mpm/glnxa64/mpm \
     || { echo "==== mpm install failed; /tmp/mathworks_root.log follows ===="; \
          cat /tmp/mathworks_root.log 2>/dev/null; exit 1; }
 
-# Batch renders no UI and opens no browsable documentation, so drop the
-# in-product HTML help tree (~60 MB). Command-line `help <fn>` still works --
-# it reads the help text from each function's .m file, not from here.
-RUN rm -rf /opt/matlab/${MATLAB_RELEASE}/help
-
-# Batch never opens the Chromium-based UI (desktop / Live Editor / uifigures).
-# The engine does hard-load libcef.so at start-up, so that stays -- but the
-# browser's *resource* payload does not: drop the localized .pak string bundles
-# (cef_locales) and the resource cache (cef_rcf), ~47 MB. Verified that
-# matlab -batch still starts and MICE/CDF still load without them.
-RUN rm -rf /opt/matlab/${MATLAB_RELEASE}/bin/glnxa64/cef_locales \
-           /opt/matlab/${MATLAB_RELEASE}/bin/glnxa64/cef_rcf
+# --- Prune batch-irrelevant trees ------------------------------------------
+# Everything deleted here is dead weight for headless `matlab -batch`: UI,
+# documentation, online-service and non-English localisation payloads. None of
+# it is loaded when MATLAB runs a batch script; each removal below was verified
+# against a real network licence server to leave `matlab -batch` -- plus MICE
+# and the NASA CDF patch, and a fft/stats/matrix/signal compute check -- fully
+# working. Sizes are approximate (R2026a + the default toolboxes); ~730 MB
+# total. What is deliberately KEPT is called out where it might surprise.
+#
+#   help/                     ~60 MB  in-product HTML documentation. NOTE:
+#                                     command-line `help <fn>` is unaffected --
+#                                     it reads the help text from each function's
+#                                     .m file, not from this tree.
+#   sys/mwds                 ~395 MB  MathWorks Service Host: the online-account
+#                                     / add-on-explorer / cloud-connector daemon.
+#                                     Unused under network (MLM_LICENSE_FILE)
+#                                     licensing.
+#   <lang> resource dirs     ~176 MB  non-English localisation (ja, ko, zh_CN,
+#                                     zh_TW, de_DE, fr_FR, es_ES, it_IT, pt_BR,
+#                                     ru_RU). English is kept.
+#   bin/glnxa64/cef_locales   ~47 MB  Chromium UI localized .pak string bundles.
+#   bin/glnxa64/cef_rcf                Chromium UI resource cache.
+#                                     KEEP: libcef.so itself -- the engine hard-
+#                                     loads it at start-up (removing it makes
+#                                     matlab -batch die silently with exit 127).
+#   bin/glnxa64/mwdocsearch   ~26 MB  in-product documentation search engine
+#   .../docsearch_server                and its builtin backend.
+#   ARIALUNI.TTF              ~22 MB  Live Editor font (no Live Editor in batch).
+#   sys/fluxbox               ~2 MB   desktop window manager (UI only).
+#
+# NOT removed: per-toolbox doc trees (*/demos, */html, */help, ~30 MB). They
+# are registered in MATLAB's search path (pathdef.m), so deleting them makes
+# MATLAB print "Name is nonexistent or not a directory" warnings on *every*
+# batch start-up. Not worth polluting every job's log for 30 MB.
+RUN set -eux; \
+    R=/opt/matlab/${MATLAB_RELEASE}; \
+    rm -rf "$R/help" \
+           "$R/sys/mwds" \
+           "$R/bin/glnxa64/cef_locales" "$R/bin/glnxa64/cef_rcf" \
+           "$R/bin/glnxa64/mwdocsearch" "$R/bin/glnxa64/builtins/docsearch_server" \
+           "$R/sys/fluxbox"; \
+    rm -f  "$R/toolbox/matlab/editor/application/fonts-liveeditor/ARIALUNI.TTF"; \
+    find "$R" -type d \( \
+              -name ja     -o -name ko     -o -name ja_JP -o -name ko_KR \
+           -o -name zh_CN  -o -name zh_TW  -o -name de_DE -o -name fr_FR \
+           -o -name es_ES  -o -name it_IT  -o -name pt_BR -o -name ru_RU \
+       \) -prune -exec rm -rf {} +
 
 # --- NASA NAIF SPICE toolkit for MATLAB (MICE) -----------------------------
 # Precompiled glnxa64 mex files -- no compiler needed.

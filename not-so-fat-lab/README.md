@@ -28,13 +28,98 @@ entrypoint.
 |---|---|
 | **UBI8-minimal** base (`microdnf`) instead of full UBI8 / Ubuntu | smallest MathWorks-supported base; ~140 MB vs ~300 MB (UBI8) / ~1.35 GB (`matlab-deps`) |
 | **Pruned, batch-only dependency set** (see `base-dependencies.txt`) | drops the desktop stack — `gtk3`, `pango`, `cairo`, `glibc-locale-source`, etc. — that batch never loads |
+| **Post-install pruning of MATLAB itself** (see [What's stripped out](#whats-stripped-out-and-why)) | deletes ~730 MB of UI, docs, online-service and non-English payloads the MATLAB install ships but batch never touches |
 | **Multi-stage build** | `mpm`, `curl`, `tar`/`unzip`, package-manager caches and install logs stay in the throwaway *installer* stage and never reach the shipped image |
-| **No desktop / proxy stack** | unlike `mathworks/matlab`, there is no VNC, no `matlab-proxy`, no Xvfb, no supervisor |
+| **No desktop / proxy stack** | unlike `mathworks/matlab`, there is no VNC, no `matlab-proxy`, no supervisor |
 
-The MATLAB product bits themselves are the same either way, so the savings come
-from the base OS, the dependency diet, and leaving all build tooling behind.
+Savings come from the base OS, the dependency diet, leaving all build tooling
+behind, **and** carving the batch-irrelevant payloads out of the MATLAB install.
 
 See [Image sizes](#image-sizes) for measured numbers.
+
+---
+
+## How the image is built
+
+A three-stage build (see [`Dockerfile`](Dockerfile)); no MATLAB licence is
+needed to build — `mpm` only downloads and installs.
+
+1. **`uv` stage** — the official `ghcr.io/astral-sh/uv` image, used purely as a
+   source to `COPY` the static `uv` / `uvx` binaries from. No installer script,
+   nothing to clean up.
+
+2. **`installer` stage** — full UBI8, entirely throwaway. It does all the heavy,
+   single-use work:
+   * installs MATLAB + the requested toolboxes with **`mpm`** (MATLAB Package
+     Manager) into `/opt/matlab/<release>`;
+   * downloads and unpacks **NASA MICE** and the **NASA CDF** patch, keeping only
+     the bits MATLAB loads at runtime;
+   * **prunes** every batch-irrelevant tree from the MATLAB install
+     ([details below](#whats-stripped-out-and-why)).
+   All the fetch/unpack tooling (`mpm`, `curl`, `tar`, caches, logs) lives and
+   dies here.
+
+3. **`runtime` stage** — UBI8-minimal, the shipped image. It:
+   * installs only the pruned, batch-only shared-library set from
+     `base-dependencies.txt` (via `microdnf`);
+   * copies `uv` from stage 1 and the finished `/opt/matlab`, `/opt/naif`,
+     `/opt/cdf` trees from the installer stage;
+   * sets `PATH` and `MATLABPATH` (so MICE + CDF auto-resolve), creates the
+     non-root `matlab` user, and defaults `ENTRYPOINT ["matlab"]`.
+
+Because only the finished trees are copied forward, none of the build tooling or
+caches reach the final image.
+
+---
+
+## What's stripped out (and why)
+
+Two categories: OS packages that are never installed, and MATLAB payloads
+deleted right after install. **Everything below was verified against a real
+network licence server** to leave `matlab -batch` — plus MICE, the NASA CDF
+patch, and an FFT / stats / matrix / Signal-Toolbox compute check — fully
+working.
+
+### Batch-only OS dependency set
+
+`base-dependencies.txt` installs only the shared libraries MATLAB `dlopen`s to
+start headless — not the full [`matlab-deps`](https://github.com/mathworks-ref-arch/container-images)
+desktop set (`gtk3`, `pango`, `cairo`, `glibc-locale-source`, …).
+
+> One entry is easy to miss: **`mesa-libgbm`**. The R2026a engine `dlopen`s
+> `libgbm.so.1` at start-up. It is *not* a linked dependency, so `ldd` never
+> reveals it — and without it `matlab -batch` dies **silently with exit 127
+> before printing anything**. Do not drop it when pruning further.
+
+### MATLAB payloads removed after install (~730 MB)
+
+| Removed | ~Size | Why it's safe for batch |
+|---|--:|---|
+| `sys/mwds` — MathWorks Service Host | 395 MB | online-account / add-on-explorer / cloud-connector daemon; unused under network (`MLM_LICENSE_FILE`) licensing |
+| non-English localisation (`ja`, `ko`, `zh_CN`, `zh_TW`, `de_DE`, `fr_FR`, `es_ES`, `it_IT`, `pt_BR`, `ru_RU`) | 176 MB | English is kept |
+| MICE extras (`doc`, `exe`, C sources, headers, `.a` archives) | 115 MB | only `mice/lib/mice.mexa64` + `mice/src/mice` are on `MATLABPATH` |
+| in-product HTML `help/` | 60 MB | command-line `help <fn>` still works (it reads each function's `.m` header, not this tree) |
+| `cef_locales` + `cef_rcf` | 47 MB | Chromium UI resource payload — batch renders no UI |
+| `mwdocsearch` + `docsearch_server` | 26 MB | in-product documentation search |
+| `ARIALUNI.TTF` | 22 MB | Live Editor font |
+| `sys/fluxbox` | 2 MB | desktop window manager |
+
+### Deliberately kept
+
+* **`libcef.so` (227 MB)** — the engine hard-loads it at start-up; removing it
+  reproduces the silent exit-127 death, so only its resource payload (above)
+  goes.
+* **The JRE (`sys/java`, 134 MB)** — many functions, and the MATLAB Report
+  Generator, need the JVM.
+* **Data-I/O libraries** — `libxl` (Excel, 36 MB), `libmwarrow` (Parquet/Arrow,
+  33 MB), `libduckdb` (46 MB). Common in real batch data pipelines.
+* **GPU/CUDA + software-render libs (~148 MB)** — removable if your jobs are
+  strictly CPU-only and never render figures; kept in for generality. See the
+  optional trims discussed in the commit history if you want them out.
+* **Per-toolbox doc trees** (`demos` / `html` / `help`, ~30 MB) — these are
+  registered in MATLAB's search path (`pathdef.m`), so deleting them makes
+  MATLAB print "nonexistent directory" warnings on *every* start-up. Not worth
+  polluting every job's log for 30 MB.
 
 ---
 
@@ -163,17 +248,32 @@ stock image does **not** — and is still substantially smaller:
 | `mathworks/matlab-deps:r2026a` (stock dependency base) | 0.31 GB | 1.35 GB |
 | `not-so-fat-lab` runtime base (pruned deps + uv + MICE + CDF, no MATLAB) | 0.15 GB | 0.63 GB |
 
-The bundled extras are cheap (on disk): NASA MICE 137 MB, NASA CDF 18 MB,
+The bundled extras are cheap (on disk): NASA MICE ~22 MB (trimmed from the
+137 MB tarball to just the runtime mex + `.m` wrappers), NASA CDF 18 MB,
 `uv` 61 MB.
 
-### With the 8 default toolboxes (what CI builds)
+### With the default toolboxes (what CI builds)
 
-The default `ADDITIONAL_PRODUCTS` adds 8 toolboxes. Toolbox bytes are identical
-wherever they are installed, so they raise this image and any stock-based
-equivalent by the *same* amount — the ~28% structural saving above (minimal
-base + pruned deps + multi-stage tooling removal + no desktop/proxy stack)
-carries straight over. The MATLAB-only figures are quoted here because they
-isolate that saving apples-to-apples and keep the measurement build fast.
+The default `ADDITIONAL_PRODUCTS` requests 8 toolboxes; `mpm` also pulls in DSP
+System Toolbox (a hard dependency of Communications Toolbox), for 9 in total.
+This is the image most people will actually run, measured on disk
+(`docker images`, `linux/amd64`, R2026a Update 3):
+
+| Build | On disk |
+|---|---:|
+| default toolboxes, before any MATLAB-payload pruning | 9.92 GB |
+| **default toolboxes, after pruning** (the shipped image) | **8.5 GB** |
+| **saving from pruning** | **−1.4 GB (−14%)** |
+
+The ~730 MB carved out of the MATLAB install (see
+[What's stripped out](#whats-stripped-out-and-why)) plus the ~115 MB MICE trim
+account for the difference; the toolbox bytes themselves are unchanged. Trimming
+`ADDITIONAL_PRODUCTS` to only the toolboxes you need is the largest remaining
+lever — the 9 toolboxes are ~1.9 GB on their own.
+
+The MATLAB-only head-to-head above is kept because it isolates the *structural*
+saving (minimal base + pruned deps + multi-stage tooling removal) apples-to-
+apples against the stock image; the pruning saving here stacks on top of it.
 
 ### How this was validated
 
